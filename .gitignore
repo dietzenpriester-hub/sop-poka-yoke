@@ -1,0 +1,46 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+.venv/
+*.egg
+.pytest_cache/
+
+# Node
+node_modules/
+packages/web/dist/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# AI 模型（大文件）
+models/yolo/*.pt
+models/yolo/*.engine
+models/vlm/
+!models/registry.yaml
+!models/yolo/.gitkeep
+!models/vlm/.gitkeep
+
+# 运行时数据
+data/
+clips/
+logs/
+*.log
+
+# Docker
+docker-compose.override.yml
+
+# OS
+.DS_Store
+Thumbs.db

@@ -1,0 +1,91 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: sop_pokayoke
+      POSTGRES_USER: sop_admin
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-changeme}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
+    ports:
+      - "6379:6379"
+    restart: unless-stopped
+
+  minio:
+    image: minio/minio:latest
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: ${MINIO_PASSWORD:-changeme}
+    command: server /data --console-address ":9001"
+    volumes:
+      - miniodata:/data
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    restart: unless-stopped
+
+  mqtt:
+    image: eclipse-mosquitto:2
+    ports:
+      - "1883:1883"
+      - "9883:9883"
+    volumes:
+      - ./deploy/mosquitto.conf:/mosquitto/config/mosquitto.conf
+    restart: unless-stopped
+
+  server:
+    build:
+      context: ./packages/server
+      dockerfile: Dockerfile
+    environment:
+      SOP_DATABASE_URL: postgresql+asyncpg://sop_admin:${DB_PASSWORD:-changeme}@postgres:5432/sop_pokayoke
+      SOP_MQTT_BROKER_HOST: mqtt
+      SOP_REDIS_URL: redis://redis:6379/0
+      SOP_MINIO_ENDPOINT: minio:9000
+      SOP_MINIO_ACCESS_KEY: minioadmin
+      SOP_MINIO_SECRET_KEY: ${MINIO_PASSWORD:-changeme}
+    depends_on:
+      - postgres
+      - redis
+      - mqtt
+      - minio
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+
+  web:
+    build:
+      context: ./packages/web
+      dockerfile: Dockerfile
+    depends_on:
+      - server
+    ports:
+      - "8080:80"
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:v2.55.1
+    volumes:
+      - ./deploy/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9090:9090"
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:11.3.0
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  miniodata:

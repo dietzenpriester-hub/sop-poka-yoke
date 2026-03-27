@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sop-poka-yoke.local/schemas/workorder.schema.json",
+  "title": "WorkOrder",
+  "type": "object",
+  "required": ["sn", "station_id", "status"],
+  "properties": {
+    "sn": { "type": "string" },
+    "station_id": { "type": "string" },
+    "sop_template_id": { "type": "integer" },
+    "status": {
+      "type": "string",
+      "enum": ["pending", "running", "complete", "error", "cancelled"]
+    },
+    "operator_id": { "type": "string" },
+    "started_at_unix": { "type": "number" },
+    "completed_at_unix": { "type": "number" }
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sop-poka-yoke.local/schemas/alert_event.schema.json",
+  "title": "AlertEvent",
+  "type": "object",
+  "required": ["station_id", "alert_code", "severity", "ts_unix"],
+  "properties": {
+    "station_id": { "type": "string" },
+    "work_order_sn": { "type": "string" },
+    "step_index": { "type": "integer" },
+    "alert_code": { "type": "string" },
+    "severity": { "type": "string", "enum": ["INFO", "WARN", "ERROR", "CRITICAL"] },
+    "message": { "type": "string" },
+    "ts_unix": { "type": "number" },
+    "payload": { "type": "object" }
+  }
+}

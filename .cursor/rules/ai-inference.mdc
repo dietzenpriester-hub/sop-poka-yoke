@@ -1,0 +1,21 @@
+---
+description: AI 推理模块规范
+globs: packages/edge/src/inference/**/*.py
+alwaysApply: false
+---
+
+# AI 推理模块规范
+
+## 模型管理
+- 模型文件不入 Git，通过 `models/registry.yaml` 管理版本
+- 启动时校验模型 SHA256 哈希
+
+## 推理优化
+- Jetson 平台优先使用 TensorRT
+- 模型预热（warmup）：启动时用全黑图触发首次推理
+- 两级过滤：YOLO (~5ms) → VLM (~80ms)
+
+## VLM 响应解析
+- 多策略解析：直接 JSON → 正则提取 → 代码块提取
+- 解析失败返回 `needs_human_review: True`
+- 提供自动重试机制

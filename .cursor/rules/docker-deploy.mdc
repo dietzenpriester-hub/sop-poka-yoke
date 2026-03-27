@@ -1,0 +1,28 @@
+---
+description: 部署规范
+globs: docker-compose*.yml,**/Dockerfile*,deploy/**
+alwaysApply: false
+---
+
+# 部署规范
+
+## Docker
+- 生产镜像使用多阶段构建
+- 服务端基础镜像：`python:3.12-slim`
+- 边缘端基础镜像：`nvcr.io/nvidia/l4t-pytorch`
+- 前端：Node 构建 + Nginx 静态
+
+## 环境变量
+- 敏感信息通过 `.env` 注入，不硬编码
+- 统一前缀 `SOP_`
+- 默认值仅用于开发环境
+
+## 端口分配
+- FastAPI: 8000
+- Vue 前端: 8080 (prod) / 5173 (dev)
+- PostgreSQL: 5432
+- Redis: 6379
+- MinIO: 9000/9001
+- MQTT: 1883/9883
+- Prometheus: 9090
+- Grafana: 3000

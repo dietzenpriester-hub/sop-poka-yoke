@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sop-poka-yoke.local/schemas/step_record.schema.json",
+  "title": "StepRecord",
+  "type": "object",
+  "required": ["work_order_sn", "step_index", "result", "ts_unix"],
+  "properties": {
+    "work_order_sn": { "type": "string" },
+    "step_index": { "type": "integer", "minimum": 0 },
+    "step_name": { "type": "string" },
+    "result": { "type": "string", "enum": ["OK", "NG", "SKIP", "OVERRIDE"] },
+    "confidence": { "type": "number" },
+    "ts_unix": { "type": "number" },
+    "video_clip_url": { "type": "string" },
+    "snapshot_url": { "type": "string" }
+  }
+}

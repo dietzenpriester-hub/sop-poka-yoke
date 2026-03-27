@@ -1,0 +1,41 @@
+"""基于帧差法 + MOG2 背景减除的关键帧提取器"""
+
+import cv2
+import numpy as np
+
+
+class KeyframeExtractor:
+
+    def __init__(self, diff_threshold: float = 30.0, min_area_ratio: float = 0.01) -> None:
+        self.diff_threshold = diff_threshold
+        self.min_area_ratio = min_area_ratio
+        self.bg_subtractor = cv2.createBackgroundSubtractorMOG2(
+            history=500, varThreshold=50, detectShadows=False
+        )
+        self._prev_gray: np.ndarray | None = None
+
+    def is_keyframe(self, frame: np.ndarray) -> bool:
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        gray = cv2.GaussianBlur(gray, (21, 21), 0)
+
+        if self._prev_gray is not None:
+            diff = cv2.absdiff(self._prev_gray, gray)
+            _, thresh = cv2.threshold(diff, 25, 255, cv2.THRESH_BINARY)
+            motion_ratio = np.count_nonzero(thresh) / thresh.size
+            has_motion = motion_ratio > self.min_area_ratio
+        else:
+            has_motion = True
+
+        self._prev_gray = gray
+
+        fg_mask = self.bg_subtractor.apply(frame)
+        fg_ratio = np.count_nonzero(fg_mask) / fg_mask.size
+        has_fg_motion = fg_ratio > self.min_area_ratio
+
+        return has_motion or has_fg_motion
+
+    def reset(self) -> None:
+        self._prev_gray = None
+        self.bg_subtractor = cv2.createBackgroundSubtractorMOG2(
+            history=500, varThreshold=50, detectShadows=False
+        )

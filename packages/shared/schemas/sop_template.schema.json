@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sop-poka-yoke.local/schemas/sop_template.schema.json",
+  "title": "SOPTemplate",
+  "type": "object",
+  "required": ["name", "version", "steps"],
+  "properties": {
+    "name": { "type": "string", "minLength": 1 },
+    "version": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+$" },
+    "product_model": { "type": "string" },
+    "steps": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/SOPStep" }
+    }
+  },
+  "$defs": {
+    "SOPStep": {
+      "type": "object",
+      "required": ["name"],
+      "properties": {
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "required_objects": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "action_type": { "type": "string" },
+        "timeout_seconds": { "type": "number", "minimum": 0 },
+        "is_optional": { "type": "boolean", "default": false }
+      }
+    }
+  }
+}

@@ -1,0 +1,47 @@
+# 边缘端默认配置
+camera:
+  urls:
+    - "rtsp://admin:password@192.168.1.64:554/Streaming/Channels/101"
+  width: 2560
+  height: 1440
+  fps: 25
+  use_gstreamer: false
+
+yolo:
+  model_path: "yolo11n.pt"
+  conf_threshold: 0.4
+  device: "cuda:0"
+
+vlm:
+  ollama_url: "http://localhost:11434"
+  model: "qwen2-vl:2b"
+  timeout: 10.0
+
+engine:
+  step_timeout_seconds: 60.0
+  debounce_seconds: 0.5
+
+hardware:
+  modbus_host: "192.168.1.100"
+  modbus_port: 502
+
+minio:
+  endpoint: "localhost:9000"
+  access_key: "minioadmin"
+  secret_key: "changeme"
+  bucket: "sop-videos"
+
+redis:
+  url: "redis://localhost:6379/0"
+
+mqtt:
+  broker: "localhost"
+  port: 1883
+
+recorder:
+  buffer_seconds: 10
+  clip_output_dir: "./clips"
+
+logging:
+  dir: "./logs"
+  level: "INFO"

@@ -1,0 +1,29 @@
+---
+description: Python 后端编码规范
+globs: packages/edge/**/*.py,packages/server/**/*.py
+alwaysApply: false
+---
+
+# Python 后端编码规范
+
+## 基本要求
+- Python 3.11+，推荐 3.12
+- 所有函数参数和返回值必须添加类型注解
+- 使用 `loguru` 记录日志，禁止使用 `print`
+- 使用 `ruff format` + `ruff check` 格式化代码
+
+## 异步优先
+- FastAPI 路由使用 `async def`
+- 数据库操作使用 SQLAlchemy async session
+
+## 日志规范
+- 使用 `loguru` 的占位符格式：`logger.info("消息 {}", variable)`
+- 禁止使用 f-string 日志：`logger.info(f"消息 {variable}")` ❌
+
+## 依赖管理
+- 使用 `pyproject.toml` + `uv` 或 `pip`
+- 环境变量统一前缀 `SOP_`
+
+## 测试
+- pytest + pytest-asyncio
+- 覆盖率目标 > 80%

@@ -1,0 +1,22 @@
+---
+description: Vue 前端编码规范
+globs: packages/web/**/*.{vue,ts,tsx}
+alwaysApply: false
+---
+
+# Vue 前端编码规范
+
+## 基本要求
+- Vue 3 Composition API + `<script setup lang="ts">`
+- TypeScript 严格模式
+- Element Plus 组件库
+- Pinia 状态管理
+
+## 命名规范
+- 组件文件：PascalCase（如 `SOPConfig.vue`）
+- composable：`use` 前缀（如 `useWebSocket.ts`）
+- API 文件：小写（如 `sop.ts`）
+
+## 代码格式
+- ESLint + Prettier
+- pnpm 包管理
