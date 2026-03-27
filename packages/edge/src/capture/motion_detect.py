@@ -20,7 +20,7 @@ class KeyframeExtractor:
 
         if self._prev_gray is not None:
             diff = cv2.absdiff(self._prev_gray, gray)
-            _, thresh = cv2.threshold(diff, 25, 255, cv2.THRESH_BINARY)
+            _, thresh = cv2.threshold(diff, self.diff_threshold, 255, cv2.THRESH_BINARY)
             motion_ratio = np.count_nonzero(thresh) / thresh.size
             has_motion = motion_ratio > self.min_area_ratio
         else:

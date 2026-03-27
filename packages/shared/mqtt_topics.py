@@ -21,6 +21,7 @@ class MQTTTopics:
     OVERRIDE = "sop/{station_id}/override"
     HEARTBEAT = "sop/{station_id}/heartbeat"
     SYNC_QUEUE = "sop/{station_id}/sync/queue"
+    DETECTION = "sop/{station_id}/detection"
 
     @staticmethod
     def step_complete(station_id: str) -> str:
@@ -49,3 +50,9 @@ class MQTTTopics:
     @staticmethod
     def sync_queue(station_id: str) -> str:
         return MQTTTopics.SYNC_QUEUE.format(station_id=station_id)
+
+    @staticmethod
+    def detection(station_id: str) -> str:
+        return MQTTTopics.DETECTION.format(
+            station_id=MQTTTopics.validate_station_id(station_id)
+        )

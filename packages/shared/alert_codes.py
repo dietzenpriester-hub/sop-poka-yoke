@@ -22,7 +22,9 @@ class AlertCode(StrEnum):
     @property
     def default_severity(self) -> str:
         prefix = self.value[0]
-        return {"E": "ERROR", "W": "WARN", "I": "INFO", "C": "CRITICAL"}[prefix]
+        return {"E": "ERROR", "W": "WARN", "I": "INFO", "C": "CRITICAL"}.get(
+            prefix, "UNKNOWN"
+        )
 
 
 _DESCRIPTIONS: dict[AlertCode, str] = {

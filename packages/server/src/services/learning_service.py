@@ -107,7 +107,9 @@ class LearningService:
         task = result.scalar_one_or_none()
         if not task:
             raise ValueError("任务不存在")
-        if task.status not in ("completed", "confirmed"):
+        if task.status == "confirmed":
+            raise ValueError("任务已确认，无法编辑步骤")
+        if task.status != "completed":
             raise ValueError(f"任务状态 {task.status} 不支持编辑步骤")
         task.steps = steps
         await db.commit()

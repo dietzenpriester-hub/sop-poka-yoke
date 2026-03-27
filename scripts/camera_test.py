@@ -13,7 +13,9 @@ import time
 import sys
 import os
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "packages", "server"))
+_ROOT = os.path.join(os.path.dirname(__file__), "..")
+sys.path.insert(0, os.path.join(_ROOT, "packages", "server"))
+sys.path.insert(0, os.path.join(_ROOT, "packages", "shared"))
 
 import cv2
 import numpy as np
@@ -24,6 +26,8 @@ try:
     HAS_MQTT = True
 except ImportError:
     HAS_MQTT = False
+
+from mqtt_topics import MQTTTopics
 
 
 def main():
@@ -136,7 +140,7 @@ def main():
                   f"{len(detections)} 个物体 ({class_summary or '无'})")
 
             if mqtt_client:
-                topic = f"sop/{args.station}/detection"
+                topic = MQTTTopics.detection(args.station)
                 mqtt_client.publish(topic, json.dumps(payload, ensure_ascii=False))
 
             if args.show and results:

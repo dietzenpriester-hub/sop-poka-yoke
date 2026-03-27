@@ -1,3 +1,7 @@
+/**
+ * 预留：后续接入 WebSocket 实时数据（工位状态、告警推送等）时使用。
+ * 当前未被引用，保留 Pinia store 定义以免重复设计。
+ */
 import { defineStore } from "pinia";
 import { computed, ref, type Ref } from "vue";
 

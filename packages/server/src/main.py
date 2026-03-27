@@ -11,7 +11,7 @@ from starlette.responses import JSONResponse
 from src.api.router import api_router
 from src.core.config import settings
 from src.core.database import engine, init_db
-from src.tasks.mqtt_consumer import start_mqtt_consumer_in_thread
+from src.tasks.mqtt_consumer import start_mqtt_consumer_in_thread, stop_mqtt_consumer
 
 
 @asynccontextmanager
@@ -21,6 +21,7 @@ async def lifespan(app: FastAPI):
     start_mqtt_consumer_in_thread()
     logger.info("SOP 服务端启动完成")
     yield
+    stop_mqtt_consumer()
     logger.info("SOP 服务端正在关闭")
 
 
@@ -43,7 +44,8 @@ app.include_router(api_router, prefix="/api")
 
 @app.exception_handler(ValueError)
 async def value_error_handler(request: Request, exc: ValueError):
-    return JSONResponse(status_code=400, content={"detail": str(exc)})
+    logger.warning("请求参数错误: {}", exc)
+    return JSONResponse(status_code=400, content={"detail": "请求参数错误"})
 
 
 @app.get("/health")

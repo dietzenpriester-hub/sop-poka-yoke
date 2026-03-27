@@ -41,7 +41,9 @@ wait_for_port() {
 
 stop_all() {
     echo -e "${YELLOW}正在停止所有服务...${NC}"
-    for port in 5173 8000 9000; do
+    # 11434: Ollama 默认端口。若 Ollama 由系统服务/其他方式常驻，停止该端口可能影响全局实例；
+    # 仅当由本脚本内「ollama serve」启动并占用 11434 时，此处停止才与启动流程一致。
+    for port in 5173 8000 9000 11434; do
         pid=$(lsof -i :"$port" -t 2>/dev/null | head -1)
         if [ -n "$pid" ]; then
             kill "$pid" 2>/dev/null && echo -e "  ${GREEN}✓${NC} 端口 $port 进程 ($pid) 已停止"

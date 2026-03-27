@@ -1,4 +1,5 @@
 # 模型版本注册表（入 Git，权重文件不入 Git）
+# 下列 hash_sha256 为占位符，下载真实权重后请替换为实际文件的 SHA256。
 models:
   yolo_detector:
     name: "yolov11-sop-detect"

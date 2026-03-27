@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -8,7 +8,7 @@ class WorkOrderCreate(BaseModel):
     sn: str = Field(..., max_length=100)
     station_id: int | None = None
     sop_template_id: int | None = None
-    status: str = "running"
+    status: Literal["running", "done"] = "running"
     operator_id: int | None = None
 
 

@@ -14,8 +14,8 @@ router = APIRouter()
 
 @router.get("/", response_model=list[SOPResponse])
 async def list_sop_templates(
-    skip: int = 0,
-    limit: int = 50,
+    skip: int = Query(default=0, ge=0),
+    limit: int = Query(default=50, ge=1, le=500),
     db: AsyncSession = Depends(get_db),
 ):
     result = await db.execute(

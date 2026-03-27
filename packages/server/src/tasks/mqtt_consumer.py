@@ -10,6 +10,9 @@ from loguru import logger
 from src.api.websocket_live import broadcast_to_station
 from src.core.config import settings
 
+_mqtt_client: mqtt.Client | None = None
+_mqtt_thread: threading.Thread | None = None
+
 
 def _parse_topic(topic: str) -> tuple[str | None, str | None]:
     """解析 MQTT 主题，返回 (station_id, event_kind)。"""
@@ -97,24 +100,48 @@ def _run_mqtt_loop(loop: asyncio.AbstractEventLoop) -> None:
             _dispatch_message(station_id, event_kind, payload), loop,
         )
 
+    global _mqtt_client
+
     client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
     client.on_connect = on_connect
     client.on_message = on_message
     if settings.MQTT_USERNAME and settings.MQTT_PASSWORD:
         client.username_pw_set(settings.MQTT_USERNAME, settings.MQTT_PASSWORD)
+    _mqtt_client = client
     try:
         client.connect(settings.MQTT_BROKER_HOST, settings.MQTT_BROKER_PORT, 60)
         client.loop_forever()
     except Exception as e:
         logger.error("MQTT 连接异常: {}，消费者线程退出", e)
+    finally:
+        _mqtt_client = None
 
 
 def start_mqtt_consumer_in_thread() -> threading.Thread:
+    global _mqtt_thread
+
     try:
         loop = asyncio.get_running_loop()
     except RuntimeError:
         loop = asyncio.get_event_loop()
     t = threading.Thread(target=_run_mqtt_loop, args=(loop,), daemon=True, name="mqtt-consumer")
     t.start()
+    _mqtt_thread = t
     logger.info("MQTT 消费者线程已启动")
     return t
+
+
+def stop_mqtt_consumer() -> None:
+    """断开 MQTT，使 loop_forever 退出并结束消费者线程。"""
+    global _mqtt_client, _mqtt_thread
+
+    c = _mqtt_client
+    if c is not None:
+        try:
+            c.disconnect()
+        except Exception as e:
+            logger.warning("MQTT 断开时异常: {}", e)
+    th = _mqtt_thread
+    if th is not None and th.is_alive():
+        th.join(timeout=5.0)
+    _mqtt_thread = None
