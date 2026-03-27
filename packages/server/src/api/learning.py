@@ -9,6 +9,8 @@ from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from minio import Minio
 from sqlalchemy.ext.asyncio import AsyncSession
 
+MAX_UPLOAD_BYTES = 100 * 1024 * 1024
+
 from src.core.config import settings
 from src.core.database import get_db
 from src.core.security import get_current_user
@@ -35,7 +37,12 @@ async def upload_standard_video(
     if not video.content_type or not video.content_type.startswith("video/"):
         raise HTTPException(400, "仅支持视频文件")
     # Upload to MinIO
-    client = Minio(settings.MINIO_ENDPOINT, settings.MINIO_ACCESS_KEY, settings.MINIO_SECRET_KEY, secure=False)
+    client = Minio(
+        settings.MINIO_ENDPOINT,
+        settings.MINIO_ACCESS_KEY,
+        settings.MINIO_SECRET_KEY,
+        secure=settings.MINIO_SECURE,
+    )
     bucket = "sop-learning"
     if not client.bucket_exists(bucket):
         client.make_bucket(bucket)
@@ -43,7 +50,16 @@ async def upload_standard_video(
     object_name = f"{product_model}/{process_name}/{uuid.uuid4()}.mp4"
     with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as tmp:
         tmp_path = tmp.name
-        shutil.copyfileobj(video.file, tmp)
+        total_read = 0
+        while True:
+            chunk = await video.read(1024 * 1024)
+            if not chunk:
+                break
+            total_read += len(chunk)
+            if total_read > MAX_UPLOAD_BYTES:
+                os.unlink(tmp_path)
+                raise HTTPException(413, "文件大小不能超过 100MB")
+            tmp.write(chunk)
     try:
         length = os.path.getsize(tmp_path)
         with open(tmp_path, "rb") as f:

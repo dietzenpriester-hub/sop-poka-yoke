@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { RouterView, useRouter } from "vue-router";
-import { ref, onMounted, onUnmounted } from "vue";
+import { RouterView, useRouter, useRoute } from "vue-router";
+import { ref, computed, onMounted, onUnmounted } from "vue";
 import {
   Monitor,
   Setting,
@@ -21,11 +21,19 @@ import {
 import { alertApi } from "@/api/alert";
 
 const router = useRouter();
+const route = useRoute();
 const isCollapse = ref(false);
 const unacknowledgedCount = ref(0);
 let badgeTimer: ReturnType<typeof setInterval> | null = null;
 
-const menuItems = [
+type MenuItem = {
+  path: string;
+  label: string;
+  icon: typeof Monitor;
+  meta?: { requiresAdmin?: boolean };
+};
+
+const allMenuItems: MenuItem[] = [
   { path: "/", label: "实时监控", icon: Monitor },
   { path: "/sop", label: "SOP 配置", icon: Setting },
   { path: "/learning", label: "标准学习", icon: Reading },
@@ -36,10 +44,30 @@ const menuItems = [
   { path: "/alerts", label: "报警管理", icon: Bell },
   { path: "/replay", label: "视频回放", icon: VideoPlay },
   { path: "/report", label: "统计报表", icon: DataAnalysis },
-  { path: "/override-log", label: "放行审计", icon: Stamp },
-  { path: "/users", label: "用户管理", icon: User },
-  { path: "/lifecycle", label: "数据管理", icon: Delete },
+  { path: "/override-log", label: "放行审计", icon: Stamp, meta: { requiresAdmin: true } },
+  { path: "/users", label: "用户管理", icon: User, meta: { requiresAdmin: true } },
+  { path: "/lifecycle", label: "数据管理", icon: Delete, meta: { requiresAdmin: true } },
 ];
+
+function jwtRole(): string | null {
+  const token = sessionStorage.getItem("sop_token");
+  if (!token) return null;
+  try {
+    const payload = JSON.parse(atob(token.split(".")[1])) as { role?: string };
+    return typeof payload.role === "string" ? payload.role : null;
+  } catch {
+    return null;
+  }
+}
+
+const isAdmin = computed(() => {
+  void route.fullPath;
+  return jwtRole() === "admin";
+});
+
+const menuItems = computed(() =>
+  allMenuItems.filter((item) => !item.meta?.requiresAdmin || isAdmin.value)
+);
 
 async function refreshBadge() {
   if (!sessionStorage.getItem("sop_token")) return;

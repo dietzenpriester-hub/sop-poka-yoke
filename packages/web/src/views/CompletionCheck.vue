@@ -66,9 +66,17 @@ async function loadList() {
   }
 }
 
+function handleSearch() {
+  page.value = 1;
+  loadList();
+  loadStats();
+}
+
 async function loadStats() {
   try {
-    const { data } = await completionCheckApi.stats();
+    const params =
+      filters.value.workorder_id != null ? { workorder_id: filters.value.workorder_id } : undefined;
+    const { data } = await completionCheckApi.stats(params);
     stats.value = data;
   } catch {
     ElMessage.warning("统计数据加载失败");
@@ -79,6 +87,7 @@ function handleReset() {
   filters.value = { workorder_id: null, result: "" };
   page.value = 1;
   loadList();
+  loadStats();
 }
 
 function handlePageSizeChange() {
@@ -141,7 +150,7 @@ onMounted(() => {
           </el-select>
         </el-form-item>
         <el-form-item>
-          <el-button type="primary" @click="loadList">查询</el-button>
+          <el-button type="primary" @click="handleSearch">查询</el-button>
           <el-button @click="handleReset">重置</el-button>
         </el-form-item>
       </el-form>

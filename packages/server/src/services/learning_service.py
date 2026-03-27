@@ -171,8 +171,17 @@ class LearningService:
         task = result.scalar_one_or_none()
         if not task:
             raise ValueError("任务不存在")
-        if task.status not in ("completed", "confirmed"):
-            raise ValueError(f"任务状态 {task.status} 不支持生成模板")
+        if task.template_id is not None:
+            tpl_r = await db.execute(select(SOPTemplate).where(SOPTemplate.id == task.template_id))
+            existing = tpl_r.scalar_one_or_none()
+            if existing:
+                return {
+                    "template_id": existing.id,
+                    "name": existing.name,
+                    "step_count": len(task.steps or []),
+                }
+        if task.status != "completed":
+            raise ValueError(f"任务状态 {task.status} 不支持确认生成（仅 completed 可确认）")
 
         template = SOPTemplate(
             name=task.process_name,

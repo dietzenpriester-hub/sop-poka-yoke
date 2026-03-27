@@ -33,7 +33,7 @@ router.beforeEach((to) => {
       const payload = JSON.parse(atob(token!.split(".")[1]));
       if (payload.role !== "admin") return { name: "dashboard" };
     } catch {
-      // dev token 无 JWT 结构时不拦截，由后端 require_admin 兜底
+      return { name: "dashboard" };
     }
   }
 });

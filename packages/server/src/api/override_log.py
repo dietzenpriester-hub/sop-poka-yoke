@@ -49,7 +49,7 @@ async def list_override_logs(
     skip: int = Query(default=0, ge=0),
     limit: int = Query(default=20, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
-    _: dict = Depends(get_current_user),
+    _: dict = Depends(require_admin),
 ):
     """分页查询强制放行记录，支持工单、工牌、日期范围筛选。"""
     conds = _filter_conditions(workorder_id, operator_badge, start_date, end_date)
@@ -161,7 +161,7 @@ async def list_by_workorder(
 async def get_override_log(
     log_id: int,
     db: AsyncSession = Depends(get_db),
-    _: dict = Depends(get_current_user),
+    _: dict = Depends(require_admin),
 ):
     """单条记录详情。"""
     result = await db.execute(select(OverrideLog).where(OverrideLog.id == log_id))

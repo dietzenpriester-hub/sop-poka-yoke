@@ -23,8 +23,11 @@ def _parse_topic(topic: str) -> tuple[str | None, str | None]:
 
 async def _handle_alert(station_id: str, payload: dict) -> None:
     """将报警持久化到数据库并广播到前端。"""
+    from sqlalchemy import or_, select
+
     from src.core.database import async_session_factory
     from src.models.alert import AlertEvent
+    from src.models.station import Station
 
     alert_id = None
     try:
@@ -37,6 +40,14 @@ async def _handle_alert(station_id: str, payload: dict) -> None:
                 step_index=payload.get("step_index", 0),
                 video_url=payload.get("video_url", ""),
             )
+            st_r = await session.execute(
+                select(Station).where(
+                    or_(Station.edge_device_id == station_id, Station.name == station_id),
+                ).limit(1),
+            )
+            station_row = st_r.scalar_one_or_none()
+            if station_row is not None:
+                alert.station_id = station_row.id
             session.add(alert)
             await session.commit()
             await session.refresh(alert)

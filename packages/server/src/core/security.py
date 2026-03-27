@@ -1,29 +1,55 @@
 """JWT 认证与授权"""
 
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
+import jwt
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from loguru import logger
 
+from src.core.config import get_settings
+
 security_scheme = HTTPBearer(auto_error=False)
 
-# TODO: 生产环境替换为真实 JWT 签发与校验（如 python-jose）
 _DEV_TOKEN = "dev-token"
 
 
 def create_access_token(user_id: int, role: str, expires_delta: timedelta | None = None) -> str:
-    """开发阶段返回固定 token；生产需替换为 JWT 签发。"""
-    logger.warning("使用开发模式 token，生产必须替换为 JWT")
-    return _DEV_TOKEN
+    """签发 HS256 JWT，包含 exp、sub（user_id）、role。"""
+    settings = get_settings()
+    if expires_delta is None:
+        expires_delta = timedelta(hours=settings.JWT_EXPIRE_HOURS)
+    expire = datetime.now(timezone.utc) + expires_delta
+    payload = {
+        "exp": expire,
+        "sub": str(user_id),
+        "role": role,
+    }
+    return jwt.encode(payload, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM)
 
 
 def verify_token(token: str) -> dict:
-    """校验 token 并返回 payload。开发阶段接受 dev-token。"""
-    if token == _DEV_TOKEN:
+    """校验 token 并返回 {"user_id": int, "role": str}。DEV_MODE 下可接受 dev-token。"""
+    settings = get_settings()
+    if settings.DEV_MODE and token == _DEV_TOKEN:
+        logger.debug("DEV_MODE: 接受 dev-token")
         return {"user_id": 1, "role": "admin"}
-    raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="无效 token")
+    try:
+        payload = jwt.decode(
+            token,
+            settings.JWT_SECRET,
+            algorithms=[settings.JWT_ALGORITHM],
+        )
+        sub = payload.get("sub")
+        if sub is None:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="无效 token")
+        user_id = int(sub) if isinstance(sub, (int, str)) else int(str(sub))
+        role = str(payload.get("role", ""))
+        return {"user_id": user_id, "role": role}
+    except jwt.PyJWTError as e:
+        logger.debug("JWT 校验失败: {}", e)
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="无效 token") from e
 
 
 async def get_current_user(

@@ -41,5 +41,6 @@ export const alertApi = {
 
   acknowledge: (id: number) => api.put(`/alert/${id}/acknowledge`),
 
-  batchAcknowledge: (ids: number[]) => api.put("/alert/batch-acknowledge", ids),
+  batchAcknowledge: (ids: number[]) =>
+    api.put("/alert/batch-acknowledge", { alert_ids: ids }),
 };

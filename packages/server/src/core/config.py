@@ -22,6 +22,12 @@ class Settings(BaseSettings):
     MINIO_ACCESS_KEY: str = "minioadmin"
     MINIO_SECRET_KEY: str = "changeme"
     MINIO_BUCKET_VIDEOS: str = "sop-videos"
+    MINIO_SECURE: bool = False
+
+    JWT_SECRET: str = "sop-pokayoke-secret-key-change-in-production"
+    JWT_ALGORITHM: str = "HS256"
+    JWT_EXPIRE_HOURS: int = 24
+    DEV_MODE: bool = False
 
 
 @lru_cache

@@ -1,6 +1,7 @@
 """报警记录 CRUD + 统计 + 确认"""
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -10,6 +11,10 @@ from src.models.alert import AlertEvent
 from src.schemas.alert import AlertCreate, AlertResponse, AlertStats
 
 router = APIRouter()
+
+
+class AlertBatchAck(BaseModel):
+    alert_ids: list[int]
 
 
 @router.get("/", response_model=list[AlertResponse])
@@ -127,11 +132,12 @@ async def acknowledge_alert(
 
 @router.put("/batch-acknowledge")
 async def batch_acknowledge(
-    alert_ids: list[int],
+    body: AlertBatchAck,
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(get_current_user),
 ):
     """批量确认报警。"""
+    alert_ids = body.alert_ids
     result = await db.execute(
         select(AlertEvent).where(AlertEvent.id.in_(alert_ids), AlertEvent.acknowledged == "0")
     )

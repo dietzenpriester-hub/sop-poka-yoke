@@ -66,6 +66,11 @@ function resultTagType(result: string | undefined): "" | "success" | "warning" |
   }
 }
 
+function handleSearch() {
+  pagination.value.skip = 0;
+  loadClips();
+}
+
 function handleReset() {
   filters.value = { sn: "", station_code: "", event_type: "", dateRange: null };
   pagination.value = { skip: 0, limit: 20 };
@@ -106,7 +111,7 @@ onMounted(() => loadClips());
           />
         </el-form-item>
         <el-form-item>
-          <el-button type="primary" @click="loadClips" :loading="loading">查询</el-button>
+          <el-button type="primary" @click="handleSearch" :loading="loading">查询</el-button>
           <el-button @click="handleReset">重置</el-button>
         </el-form-item>
       </el-form>

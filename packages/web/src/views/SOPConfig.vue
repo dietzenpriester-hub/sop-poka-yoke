@@ -5,6 +5,8 @@ import { ArrowDown, ArrowUp } from "@element-plus/icons-vue";
 import { sopApi, type SOPTemplate } from "@/api/sop";
 
 interface SOPStep {
+  /** 仅用于列表渲染，不提交到 API */
+  clientKey: string;
   name: string;
   description: string;
   required_objects: string[];
@@ -41,6 +43,7 @@ function normalizeStep(raw: Record<string, unknown>): SOPStep {
     ? ro.filter((x): x is string => typeof x === "string")
     : [];
   return {
+    clientKey: crypto.randomUUID(),
     name,
     description,
     required_objects,
@@ -52,6 +55,7 @@ function normalizeStep(raw: Record<string, unknown>): SOPStep {
 
 function emptyStep(): SOPStep {
   return {
+    clientKey: crypto.randomUUID(),
     name: "",
     description: "",
     required_objects: [],
@@ -303,7 +307,7 @@ onMounted(loadTemplates);
 
         <el-card
           v-for="(step, index) in form.steps"
-          :key="index"
+          :key="step.clientKey"
           shadow="never"
           class="step-card"
         >

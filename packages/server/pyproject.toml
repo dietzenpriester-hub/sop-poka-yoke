@@ -21,6 +21,7 @@ dependencies = [
     "python-multipart",
     "loguru>=0.7",
     "httpx",
+    "pyjwt>=2.0",
 ]
 
 [project.optional-dependencies]

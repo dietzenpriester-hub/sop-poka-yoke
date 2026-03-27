@@ -1,6 +1,6 @@
 """SOP 模板 CRUD"""
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -41,7 +41,11 @@ async def create_sop_template(
 
 
 @router.get("/{template_id}", response_model=SOPResponse)
-async def get_sop_template(template_id: int, db: AsyncSession = Depends(get_db)):
+async def get_sop_template(
+    template_id: int,
+    db: AsyncSession = Depends(get_db),
+    _: dict = Depends(get_current_user),
+):
     result = await db.execute(select(SOPTemplate).where(SOPTemplate.id == template_id))
     template = result.scalar_one_or_none()
     if not template:

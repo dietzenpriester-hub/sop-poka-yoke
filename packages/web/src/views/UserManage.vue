@@ -95,8 +95,8 @@ async function handleDelete(user: UserItem) {
     await userApi.delete(user.id);
     ElMessage.success("用户已删除");
     loadUsers();
-  } catch (e) {
-    if (e !== "cancel") ElMessage.error("删除失败");
+  } catch (e: unknown) {
+    if (e !== "cancel") ElMessage.error(parseErrorMsg(e, "删除失败"));
   }
 }
 

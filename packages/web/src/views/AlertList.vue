@@ -92,6 +92,11 @@ function formatTime(ts: string): string {
   return new Date(ts).toLocaleString("zh-CN");
 }
 
+function handleSearch() {
+  pagination.value.skip = 0;
+  loadAlerts();
+}
+
 function handleReset() {
   filters.value = { severity: "", alert_type: "", acknowledged: "" };
   pagination.value = { skip: 0, limit: 50 };
@@ -193,7 +198,7 @@ onUnmounted(() => {
           </el-select>
         </el-form-item>
         <el-form-item>
-          <el-button type="primary" @click="loadAlerts">查询</el-button>
+          <el-button type="primary" @click="handleSearch">查询</el-button>
           <el-button @click="handleReset">重置</el-button>
         </el-form-item>
       </el-form>

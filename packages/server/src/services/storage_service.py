@@ -17,7 +17,7 @@ class StorageService:
             settings.MINIO_ENDPOINT,
             settings.MINIO_ACCESS_KEY,
             settings.MINIO_SECRET_KEY,
-            secure=False,
+            secure=settings.MINIO_SECURE,
         )
         self._ensure_bucket(settings.MINIO_BUCKET_VIDEOS)
 

@@ -1,5 +1,6 @@
 """视频回放：查询步骤/报警关联的视频片段，生成 MinIO 预签名 URL。"""
 
+import re
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -13,6 +14,27 @@ from src.models.workorder import StepRecord, WorkOrder
 from src.services.storage_service import get_storage_service
 
 router = APIRouter()
+
+_CLIP_ALLOWED_PREFIXES = ("sop-videos/", "sop-learning/")
+_CLIP_SAFE_RELATIVE = re.compile(r"^[a-zA-Z0-9_.\-/]+$")
+
+
+def _validate_clip_object_name(object_name: str) -> None:
+    """限制预签名 URL 仅能访问允许的 object key，防止路径遍历。"""
+    if not object_name or not object_name.strip():
+        raise HTTPException(status_code=400, detail="object_name 不能为空")
+    name = object_name.strip()
+    if ".." in name:
+        raise HTTPException(status_code=400, detail="非法路径")
+    if name.startswith(("/", "\\")):
+        raise HTTPException(status_code=400, detail="不允许绝对路径")
+    if len(name) > 1 and name[1] == ":":
+        raise HTTPException(status_code=400, detail="不允许绝对路径")
+    if any(name.startswith(p) for p in _CLIP_ALLOWED_PREFIXES):
+        return
+    if _CLIP_SAFE_RELATIVE.fullmatch(name):
+        return
+    raise HTTPException(status_code=400, detail="object_name 格式不允许")
 
 
 @router.get("/clips")
@@ -97,6 +119,7 @@ async def get_clip_url(
     user: dict = Depends(get_current_user),
 ):
     """获取单个视频的预签名播放 URL。"""
+    _validate_clip_object_name(object_name)
     storage = get_storage_service()
     url = storage.get_video_url(object_name)
     if not url:

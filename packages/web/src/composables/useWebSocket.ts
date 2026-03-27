@@ -42,6 +42,8 @@ export function useStationWebSocket(
       return;
     }
     const token = sessionStorage.getItem("sop_token");
+    // 安全提示：JWT 放在 URL query 中可能被代理/日志/Referer 泄露；内网部署可接受。
+    // 若面向公网或严格合规环境，应改为首包鉴权、子协议 Cookie（SameSite）或短期 WS 专用票据。
     const qs = token ? `?token=${encodeURIComponent(token)}` : "";
     ws = new WebSocket(`${apiBaseWs}/api/ws/live/${encodeURIComponent(id)}${qs}`);
     ws.onopen = () => {

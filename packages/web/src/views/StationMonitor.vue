@@ -81,8 +81,8 @@ async function handleDelete(station: StationItem) {
     await stationApi.delete(station.id);
     ElMessage.success("工位已删除");
     loadStations();
-  } catch (e) {
-    if (e !== "cancel") ElMessage.error("删除失败");
+  } catch (e: unknown) {
+    if (e !== "cancel") ElMessage.error(parseErrorMsg(e, "删除失败"));
   }
 }
 

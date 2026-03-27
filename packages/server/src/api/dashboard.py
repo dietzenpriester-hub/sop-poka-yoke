@@ -42,7 +42,7 @@ async def overview(
     today_ng = ng_result.scalar_one()
 
     total = today_ok + today_ng
-    ok_rate = round(today_ok / total * 100, 1) if total > 0 else 100.0
+    ok_rate = round(today_ok / total * 100, 1) if total > 0 else 0.0
 
     # 未确认报警
     unack_q = select(func.count(AlertEvent.id)).where(AlertEvent.acknowledged == "0")

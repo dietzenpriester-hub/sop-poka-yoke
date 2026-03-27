@@ -2,6 +2,7 @@ import axios from "axios";
 
 const api = axios.create({
   baseURL: import.meta.env.VITE_API_BASE || "/api",
+  // 默认 10s；大文件上传建议单独建 axios 实例并设更长 timeout 或配合 onUploadProgress
   timeout: 10000,
 });
 
