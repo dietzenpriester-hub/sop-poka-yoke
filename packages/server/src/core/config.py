@@ -29,6 +29,14 @@ class Settings(BaseSettings):
     JWT_EXPIRE_HOURS: int = 24
     DEV_MODE: bool = False
 
+    # AI 分析配置
+    OLLAMA_URL: str = "http://localhost:11434"
+    VLM_MODEL: str = "qwen2.5vl:3b"
+    VLM_TIMEOUT: float = 120.0
+    YOLO_MODEL: str = "yolo11n.pt"
+    YOLO_DEVICE: str = ""  # 空字符串 = 自动选择 (MPS > CPU)
+    MAX_KEYFRAMES: int = 30
+
 
 @lru_cache
 def get_settings() -> Settings:

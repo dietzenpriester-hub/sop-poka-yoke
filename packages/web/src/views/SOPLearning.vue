@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onUnmounted } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
-import type { UploadFile, UploadInstance } from "element-plus";
+// UploadFile/UploadInstance removed: using native <input type="file">
 import { learningApi, type LearningTask, type LearningStep } from "@/api/learning";
 
 function parseErrorMsg(e: unknown, fallback: string): string {
@@ -71,8 +71,8 @@ const total = ref(0);
 const productModel = ref("");
 const processName = ref("");
 const uploadLoading = ref(false);
-const uploadRef = ref<UploadInstance>();
-const uploadFileList = ref<UploadFile[]>([]);
+const fileInputRef = ref<HTMLInputElement>();
+const selectedFile = ref<File | null>(null);
 
 const detailVisible = ref(false);
 const detailLoading = ref(false);
@@ -169,24 +169,30 @@ onUnmounted(() => {
   stopPolling();
 });
 
+function onFileSelected(event: Event) {
+  const input = event.target as HTMLInputElement;
+  if (input.files && input.files.length > 0) {
+    selectedFile.value = input.files[0];
+  }
+}
+
 async function submitUpload() {
-  const raw = uploadFileList.value[0]?.raw;
   if (!productModel.value.trim() || !processName.value.trim()) {
     ElMessage.warning("请填写产品型号和工序名称");
     return;
   }
-  if (!raw) {
+  if (!selectedFile.value) {
     ElMessage.warning("请选择视频文件");
     return;
   }
   uploadLoading.value = true;
   const formData = new FormData();
-  formData.append("video", raw);
+  formData.append("video", selectedFile.value);
   try {
     await learningApi.uploadVideo(formData, productModel.value.trim(), processName.value.trim());
     ElMessage.success("视频已上传，分析任务已排队");
-    uploadRef.value?.clearFiles();
-    uploadFileList.value = [];
+    selectedFile.value = null;
+    if (fileInputRef.value) fileInputRef.value.value = "";
     await loadTasks();
   } catch (e) {
     ElMessage.error(parseErrorMsg(e, "上传失败"));
@@ -326,19 +332,20 @@ function analysisDetailEntries(task: LearningTask): { key: string; value: string
           <el-input v-model="processName" placeholder="如 螺丝装配" clearable />
         </el-form-item>
         <el-form-item label="标准视频">
-          <el-upload
-            ref="uploadRef"
-            v-model:file-list="uploadFileList"
-            :auto-upload="false"
-            accept="video/*"
-            :limit="1"
-            :disabled="uploadLoading"
-          >
-            <el-button type="primary" :loading="uploadLoading">选择视频文件</el-button>
-            <template #tip>
-              <div class="el-upload__tip">支持常见视频格式，上传后自动进入 AI 分析队列</div>
-            </template>
-          </el-upload>
+          <div>
+            <input
+              ref="fileInputRef"
+              type="file"
+              accept="video/*"
+              style="display: none"
+              @change="onFileSelected"
+            />
+            <el-button type="primary" :loading="uploadLoading" @click="fileInputRef?.click()">
+              选择视频文件
+            </el-button>
+            <span v-if="selectedFile" style="margin-left: 12px">{{ selectedFile.name }}</span>
+            <div class="el-upload__tip" style="margin-top: 4px">支持常见视频格式，上传后自动进入 AI 分析队列</div>
+          </div>
         </el-form-item>
         <el-form-item>
           <el-button type="success" :loading="uploadLoading" @click="submitUpload">上传并开始分析</el-button>

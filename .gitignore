@@ -52,3 +52,4 @@ htmlcov/
 # 本地数据库
 *.sqlite
 *.sqlite3
+packages/server/yolo11n.pt
