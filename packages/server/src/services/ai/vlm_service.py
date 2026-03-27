@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import json
+from typing import Callable
 
 import cv2
 import httpx
@@ -19,23 +21,36 @@ class VLMService:
         ollama_url: str = "http://localhost:11434",
         model: str = "qwen2.5vl:3b",
         timeout: float = 120.0,
+        max_retries: int = 2,
     ):
         self.ollama_url = ollama_url.rstrip("/")
         self.model = model
         self.timeout = timeout
+        self.max_retries = max_retries
+        self._client: httpx.AsyncClient | None = None
+
+    async def _get_client(self) -> httpx.AsyncClient:
+        if self._client is None or self._client.is_closed:
+            self._client = httpx.AsyncClient(timeout=self.timeout)
+        return self._client
+
+    async def close(self) -> None:
+        if self._client and not self._client.is_closed:
+            await self._client.aclose()
+            self._client = None
 
     async def check_available(self) -> bool:
         try:
-            async with httpx.AsyncClient(timeout=5.0) as client:
-                resp = await client.get(f"{self.ollama_url}/api/tags")
-                if resp.status_code != 200:
-                    return False
-                data = resp.json()
-                model_names = [m.get("name", "") for m in data.get("models", [])]
-                available = any(self.model in name for name in model_names)
-                if not available:
-                    logger.warning("VLM 模型 {} 未找到，已安装: {}", self.model, model_names)
-                return available
+            client = await self._get_client()
+            resp = await client.get(f"{self.ollama_url}/api/tags", timeout=5.0)
+            if resp.status_code != 200:
+                return False
+            data = resp.json()
+            model_names = [m.get("name", "") for m in data.get("models", [])]
+            available = any(self.model in name for name in model_names)
+            if not available:
+                logger.warning("VLM 模型 {} 未找到，已安装: {}", self.model, model_names)
+            return available
         except Exception as e:
             logger.error("无法连接 Ollama: {}", e)
             return False
@@ -66,16 +81,21 @@ class VLMService:
         detected_objects_per_frame: list[list[str]],
         process_name: str,
         overview: str,
+        on_batch_progress: Callable[[int, int], None] | None = None,
     ) -> list[dict]:
         """分批分析帧序列，识别具体操作步骤并输出结构化 JSON。"""
         batch_size = 5
         all_raw_steps: list[dict] = []
+        total_batches = (len(frames) + batch_size - 1) // batch_size
 
-        for batch_start in range(0, len(frames), batch_size):
+        for batch_idx, batch_start in enumerate(range(0, len(frames), batch_size)):
             batch_end = min(batch_start + batch_size, len(frames))
             batch_frames = frames[batch_start:batch_end]
             batch_timestamps = timestamps[batch_start:batch_end]
             batch_objects = detected_objects_per_frame[batch_start:batch_end]
+
+            if on_batch_progress:
+                on_batch_progress(batch_idx, total_batches)
 
             images_b64 = [self._encode_frame(f) for f in batch_frames]
 
@@ -109,9 +129,9 @@ class VLMService:
                 raw = await self._chat(prompt, images_b64)
                 steps = self._parse_steps_json(raw)
                 all_raw_steps.extend(steps)
-                logger.debug("VLM 批次 {}-{}: 识别 {} 个步骤", batch_start, batch_end, len(steps))
+                logger.debug("VLM 批次 {}/{}: 识别 {} 个步骤", batch_idx + 1, total_batches, len(steps))
             except Exception as e:
-                logger.warning("VLM 批次 {}-{} 分析失败: {}", batch_start, batch_end, e)
+                logger.warning("VLM 批次 {}/{} 分析失败: {}", batch_idx + 1, total_batches, e)
 
         return self._deduplicate_steps(all_raw_steps)
 
@@ -170,11 +190,21 @@ class VLMService:
             "options": {"temperature": 0.1, "num_predict": 2000},
         }
 
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
-            resp = await client.post(f"{self.ollama_url}/api/chat", json=payload)
-            resp.raise_for_status()
-            data = resp.json()
-            return data["message"]["content"]
+        client = await self._get_client()
+        last_exc: Exception | None = None
+        for attempt in range(1, self.max_retries + 2):
+            try:
+                resp = await client.post(f"{self.ollama_url}/api/chat", json=payload)
+                resp.raise_for_status()
+                data = resp.json()
+                return data["message"]["content"]
+            except (httpx.TimeoutException, httpx.ConnectError) as e:
+                last_exc = e
+                if attempt <= self.max_retries:
+                    wait = 2 ** attempt
+                    logger.warning("VLM 请求失败 (第{}次), {}秒后重试: {}", attempt, wait, e)
+                    await asyncio.sleep(wait)
+        raise last_exc  # type: ignore[misc]
 
     @staticmethod
     def _encode_frame(frame: np.ndarray) -> str:

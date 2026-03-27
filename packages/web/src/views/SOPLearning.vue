@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onUnmounted } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
-// UploadFile/UploadInstance removed: using native <input type="file">
 import { learningApi, type LearningTask, type LearningStep } from "@/api/learning";
 
 function parseErrorMsg(e: unknown, fallback: string): string {
@@ -28,7 +27,8 @@ function statusLabel(status: string): string {
     analyzing: "分析中",
     phase_1: "阶段1·分帧",
     phase_2: "阶段2·识别",
-    phase_3: "阶段3·优化",
+    phase_3: "阶段3·分析",
+    phase_4: "阶段4·优化",
     completed: "已完成",
     failed: "失败",
     confirmed: "已确认",

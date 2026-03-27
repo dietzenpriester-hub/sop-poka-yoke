@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import tempfile
-from pathlib import Path
 from typing import Any, Callable, Coroutine
 
 from loguru import logger
@@ -69,16 +68,23 @@ class AnalysisPipeline:
         # --- Phase 1: Download + Frame Extraction ---
         await _report(0.02, "视频下载中", {"current_phase": 1, "total_phases": 4})
 
-        tmp_path = tempfile.mktemp(suffix=".mp4")
+        loop = asyncio.get_running_loop()
+        tmp = tempfile.NamedTemporaryFile(suffix=".mp4", delete=False)
+        tmp_path = tmp.name
+        tmp.close()
         try:
             await self._download_from_minio(video_minio_path, tmp_path)
             await _report(0.08, "视频分帧与关键帧提取", {"current_phase": 1, "total_phases": 4})
 
-            extraction = await asyncio.get_event_loop().run_in_executor(
+            extraction = await loop.run_in_executor(
                 None, self.frame_extractor.extract, tmp_path,
             )
         finally:
-            Path(tmp_path).unlink(missing_ok=True)
+            import os
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
 
         if not extraction.keyframes:
             raise ValueError("视频中未提取到任何关键帧，请检查视频文件是否有效。")
@@ -98,7 +104,7 @@ class AnalysisPipeline:
 
         frames_bgr = [kf.frame_bgr for kf in extraction.keyframes]
 
-        yolo_results = await asyncio.get_event_loop().run_in_executor(
+        yolo_results = await loop.run_in_executor(
             None, self.yolo_service.detect_frames, frames_bgr,
         )
 
@@ -128,12 +134,21 @@ class AnalysisPipeline:
         timestamps = [kf.timestamp_sec for kf in extraction.keyframes]
         objects_per_frame = [fd.object_names for fd in yolo_results]
 
+        def on_batch_progress(batch_idx: int, total_batches: int) -> None:
+            batch_progress = 0.60 + (batch_idx / max(total_batches, 1)) * 0.20
+            asyncio.ensure_future(_report(
+                batch_progress,
+                f"VLM 分析批次 {batch_idx + 1}/{total_batches}",
+                {"current_phase": 3, "total_phases": 4, "phase": f"VLM 分析 {batch_idx + 1}/{total_batches}"},
+            ))
+
         raw_steps = await self.vlm_service.analyze_steps(
             frames=frames_bgr,
             timestamps=timestamps,
             detected_objects_per_frame=objects_per_frame,
             process_name=process_name,
             overview=overview,
+            on_batch_progress=on_batch_progress,
         )
 
         await _report(0.80, "VLM 分析完成", {

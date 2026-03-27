@@ -70,7 +70,7 @@ class LearningService:
             elif progress < 0.85:
                 task.status = "phase_3"
             elif progress < 1.0:
-                task.status = "phase_3"
+                task.status = "phase_4"
             await db.commit()
 
         steps = await self.pipeline.run(

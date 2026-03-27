@@ -66,41 +66,42 @@ class FrameExtractor:
         frame_idx = 0
         last_keyframe_idx = -min_interval_frames
 
-        while True:
-            ret, frame = cap.read()
-            if not ret:
-                break
+        try:
+            while True:
+                ret, frame = cap.read()
+                if not ret:
+                    break
 
-            timestamp = frame_idx / fps
-            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                timestamp = frame_idx / fps
+                gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
-            if prev_gray is not None and (frame_idx - last_keyframe_idx) >= min_interval_frames:
-                diff = cv2.absdiff(gray, prev_gray)
-                mean_diff = float(np.mean(diff))
+                if prev_gray is not None and (frame_idx - last_keyframe_idx) >= min_interval_frames:
+                    diff = cv2.absdiff(gray, prev_gray)
+                    mean_diff = float(np.mean(diff))
 
-                if mean_diff > self.scene_threshold:
+                    if mean_diff > self.scene_threshold:
+                        kf = KeyFrame(
+                            index=frame_idx,
+                            timestamp_sec=round(timestamp, 2),
+                            frame_bgr=frame.copy(),
+                            is_scene_change=True,
+                        )
+                        scene_changes.append(kf)
+                        last_keyframe_idx = frame_idx
+
+                if frame_idx % uniform_interval == 0:
                     kf = KeyFrame(
                         index=frame_idx,
                         timestamp_sec=round(timestamp, 2),
                         frame_bgr=frame.copy(),
-                        is_scene_change=True,
+                        is_scene_change=False,
                     )
-                    scene_changes.append(kf)
-                    last_keyframe_idx = frame_idx
+                    uniform_samples.append(kf)
 
-            if frame_idx % uniform_interval == 0:
-                kf = KeyFrame(
-                    index=frame_idx,
-                    timestamp_sec=round(timestamp, 2),
-                    frame_bgr=frame.copy(),
-                    is_scene_change=False,
-                )
-                uniform_samples.append(kf)
-
-            prev_gray = gray
-            frame_idx += 1
-
-        cap.release()
+                prev_gray = gray
+                frame_idx += 1
+        finally:
+            cap.release()
 
         result.keyframes = self._merge_and_limit(scene_changes, uniform_samples)
         logger.info(
