@@ -28,11 +28,23 @@ class TrackedObject:
 
 class YOLODetector:
 
-    def __init__(self, model_path: str = "yolo11n.pt", conf_threshold: float = 0.4, device: str = "cuda:0") -> None:
+    def __init__(self, model_path: str = "yolo11n.pt", conf_threshold: float = 0.4, device: str = "auto") -> None:
         self.model = YOLO(model_path)
         self.conf_threshold = conf_threshold
-        self.device = device
-        logger.info("YOLO 模型已加载: {} (device={})", model_path, device)
+        if device == "auto":
+            try:
+                import torch
+                if torch.cuda.is_available():
+                    self.device = "cuda:0"
+                elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+                    self.device = "mps"
+                else:
+                    self.device = "cpu"
+            except ImportError:
+                self.device = "cpu"
+        else:
+            self.device = device
+        logger.info("YOLO 模型已加载: {} (device={})", model_path, self.device)
 
     def detect(self, frame: np.ndarray) -> list[Detection]:
         results = self.model(frame, conf=self.conf_threshold, device=self.device, verbose=False)

@@ -61,7 +61,7 @@ class VLMService:
         process_name: str,
     ) -> str:
         """发送少量帧，获取工序整体概览描述。"""
-        images_b64 = [self._encode_frame(f) for f in frames[:5]]
+        images_b64 = [self._encode_frame(f) for f in frames[:3]]
 
         prompt = (
             f"这是一段「{process_name}」工业制造工序的操作视频截图（按时间顺序排列）。\n"
@@ -84,7 +84,7 @@ class VLMService:
         on_batch_progress: Callable[[int, int], None] | None = None,
     ) -> list[dict]:
         """分批分析帧序列，识别具体操作步骤并输出结构化 JSON。"""
-        batch_size = 5
+        batch_size = 3
         all_raw_steps: list[dict] = []
         total_batches = (len(frames) + batch_size - 1) // batch_size
 
@@ -207,8 +207,12 @@ class VLMService:
         raise last_exc  # type: ignore[misc]
 
     @staticmethod
-    def _encode_frame(frame: np.ndarray) -> str:
-        _, buffer = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
+    def _encode_frame(frame: np.ndarray, max_dim: int = 640) -> str:
+        h, w = frame.shape[:2]
+        if max(h, w) > max_dim:
+            scale = max_dim / max(h, w)
+            frame = cv2.resize(frame, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_AREA)
+        _, buffer = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 75])
         return base64.b64encode(buffer).decode("utf-8")
 
     @staticmethod
