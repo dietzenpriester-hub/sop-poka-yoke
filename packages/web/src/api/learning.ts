@@ -1,4 +1,4 @@
-import api from "./index";
+import api, { apiUpload } from "./index";
 
 export interface LearningStep {
   index: number;
@@ -36,7 +36,7 @@ export interface LearningTaskListResult {
 
 export const learningApi = {
   uploadVideo: (formData: FormData, productModel: string, processName: string) =>
-    api.post<{ task_id: string; status: string }>(
+    apiUpload.post<{ task_id: string; status: string }>(
       `/learning/upload-video?product_model=${encodeURIComponent(productModel)}&process_name=${encodeURIComponent(processName)}`,
       formData
     ),

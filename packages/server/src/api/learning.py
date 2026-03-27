@@ -1,7 +1,6 @@
 """SOP 学习模块 API — 增强版"""
 
 import os
-import shutil
 import tempfile
 import uuid
 

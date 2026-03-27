@@ -82,6 +82,7 @@ const stepsSaving = ref(false);
 const confirmLoading = ref(false);
 
 let pollTimer: ReturnType<typeof setInterval> | null = null;
+let detailReqId = 0;
 
 const shouldPoll = computed(() => {
   const listHasActive = tasks.value.some((t) => isAnalysisRunning(t.status));
@@ -104,18 +105,23 @@ async function loadTasks(showError = true) {
 }
 
 async function loadTaskDetail(taskId: string) {
+  const reqId = ++detailReqId;
   detailLoading.value = true;
   try {
     const { data } = await learningApi.getTask(taskId);
+    if (reqId !== detailReqId) return;
     currentTask.value = data;
     editingSteps.value = (data.steps || []).map((s, i) =>
       normalizeStep(s as unknown as Record<string, unknown>, i)
     );
   } catch (e) {
+    if (reqId !== detailReqId) return;
     ElMessage.error(parseErrorMsg(e, "加载任务详情失败"));
     currentTask.value = null;
   } finally {
-    detailLoading.value = false;
+    if (reqId === detailReqId) {
+      detailLoading.value = false;
+    }
   }
 }
 

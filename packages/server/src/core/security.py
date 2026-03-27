@@ -1,5 +1,6 @@
 """JWT 认证与授权"""
 
+import os
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
@@ -32,7 +33,9 @@ def create_access_token(user_id: int, role: str, expires_delta: timedelta | None
 def verify_token(token: str) -> dict:
     """校验 token 并返回 {"user_id": int, "role": str}。DEV_MODE 下可接受 dev-token。"""
     settings = get_settings()
-    if settings.DEV_MODE and token == _DEV_TOKEN:
+    if settings.DEV_MODE and os.environ.get("SOP_ENV") == "production":
+        logger.warning("DEV_MODE 与 SOP_ENV=production 同时设置，已忽略 DEV_MODE（按生产校验 JWT）")
+    elif settings.DEV_MODE and token == _DEV_TOKEN:
         logger.debug("DEV_MODE: 接受 dev-token")
         return {"user_id": 1, "role": "admin"}
     try:
@@ -44,7 +47,15 @@ def verify_token(token: str) -> dict:
         sub = payload.get("sub")
         if sub is None:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="无效 token")
-        user_id = int(sub) if isinstance(sub, (int, str)) else int(str(sub))
+        try:
+            if isinstance(sub, int):
+                user_id = sub
+            elif isinstance(sub, str):
+                user_id = int(sub)
+            else:
+                user_id = int(str(sub))
+        except ValueError as e:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="无效 token") from e
         role = str(payload.get("role", ""))
         return {"user_id": user_id, "role": role}
     except jwt.PyJWTError as e:

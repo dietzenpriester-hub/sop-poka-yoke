@@ -1,6 +1,6 @@
 """工单管理"""
 
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
@@ -19,8 +19,8 @@ async def list_workorders(
     station_id: int | None = None,
     status: str | None = None,
     sn: str | None = None,
-    start_date: str | None = None,
-    end_date: str | None = None,
+    start_date: date | None = None,
+    end_date: date | None = None,
     skip: int = Query(default=0, ge=0),
     limit: int = Query(default=50, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
@@ -33,11 +33,12 @@ async def list_workorders(
         q = q.where(WorkOrder.status == status)
     if sn:
         q = q.where(WorkOrder.sn.icontains(sn))
-    if start_date:
-        q = q.where(WorkOrder.start_time >= start_date)
-    if end_date:
-        end_dt = datetime.strptime(end_date, "%Y-%m-%d") + timedelta(days=1)
-        q = q.where(WorkOrder.start_time < end_dt)
+    if start_date is not None:
+        start_dt = datetime.combine(start_date, time.min, tzinfo=timezone.utc)
+        q = q.where(WorkOrder.start_time >= start_dt)
+    if end_date is not None:
+        end_exclusive = datetime.combine(end_date + timedelta(days=1), time.min, tzinfo=timezone.utc)
+        q = q.where(WorkOrder.start_time < end_exclusive)
     result = await db.execute(q.order_by(WorkOrder.id.desc()).offset(skip).limit(limit))
     return list(result.scalars().all())
 

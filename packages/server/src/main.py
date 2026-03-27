@@ -16,6 +16,7 @@ from src.tasks.mqtt_consumer import start_mqtt_consumer_in_thread
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    settings.warn_default_secrets()
     await init_db()
     start_mqtt_consumer_in_thread()
     logger.info("SOP 服务端启动完成")

@@ -15,11 +15,11 @@ services:
 
   redis:
     image: redis:7-alpine
-    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
+    command: redis-server --requirepass changeme --maxmemory 256mb --maxmemory-policy allkeys-lru
     ports:
       - "6379:6379"
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD", "redis-cli", "-a", "changeme", "ping"]
     restart: unless-stopped
 
   minio:
@@ -51,7 +51,7 @@ services:
     environment:
       SOP_DATABASE_URL: postgresql+asyncpg://sop_admin:${DB_PASSWORD:-changeme}@postgres:5432/sop_pokayoke
       SOP_MQTT_BROKER_HOST: mqtt
-      SOP_REDIS_URL: redis://redis:6379/0
+      SOP_REDIS_URL: redis://:changeme@redis:6379/0
       SOP_MINIO_ENDPOINT: minio:9000
       SOP_MINIO_ACCESS_KEY: minioadmin
       SOP_MINIO_SECRET_KEY: ${MINIO_PASSWORD:-changeme}

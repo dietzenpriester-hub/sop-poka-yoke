@@ -134,13 +134,13 @@ class AnalysisPipeline:
         timestamps = [kf.timestamp_sec for kf in extraction.keyframes]
         objects_per_frame = [fd.object_names for fd in yolo_results]
 
-        def on_batch_progress(batch_idx: int, total_batches: int) -> None:
+        async def on_batch_progress(batch_idx: int, total_batches: int) -> None:
             batch_progress = 0.60 + (batch_idx / max(total_batches, 1)) * 0.20
-            asyncio.ensure_future(_report(
+            await _report(
                 batch_progress,
                 f"VLM 分析批次 {batch_idx + 1}/{total_batches}",
                 {"current_phase": 3, "total_phases": 4, "phase": f"VLM 分析 {batch_idx + 1}/{total_batches}"},
-            ))
+            )
 
         raw_steps = await self.vlm_service.analyze_steps(
             frames=frames_bgr,

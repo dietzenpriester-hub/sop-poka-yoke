@@ -111,7 +111,8 @@ class SOPStateMachine:
             return {"event": "step_ng", "message": f"动作不匹配: 期望 [{current_step.name}]", "confidence": confidence}
 
     def check_timeout(self) -> dict | None:
-        if self.status != SOPStatus.RUNNING:
+        # STEP_OK 时已进入下一步等待，仍需检测当前步超时（RUNNING 与 STEP_OK 均表示工单进行中）
+        if self.status not in (SOPStatus.RUNNING, SOPStatus.STEP_OK):
             return None
         current_step = self.get_current_step()
         if not current_step or self._step_start_time is None:

@@ -25,7 +25,9 @@ class MQTTClient:
         logger.info("MQTT 已连接: {}:{}", self.broker, self.port)
 
     def publish(self, topic: str, payload: dict[str, Any]) -> None:
-        self._client.publish(topic, json.dumps(payload, ensure_ascii=False))
+        info = self._client.publish(topic, json.dumps(payload, ensure_ascii=False))
+        if info.rc != mqtt.MQTT_ERR_SUCCESS:
+            logger.warning("MQTT publish 失败: rc={} topic={}", info.rc, topic)
 
     def subscribe(self, topic: str, handler: Callable) -> None:
         self._handlers[topic] = handler

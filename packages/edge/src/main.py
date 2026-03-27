@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import os
 import time
@@ -190,13 +191,16 @@ def main() -> None:
             events = tracker.update(dets)
             detect_count += 1
 
-            det_classes = [d.get("class_name", d.get("label", "")) for d in dets] if isinstance(dets, list) else []
+            det_dicts = [dataclasses.asdict(d) for d in dets] if isinstance(dets, list) else []
+            det_classes = [
+                d.get("class_name", d.get("label", "")) for d in det_dicts
+            ] if det_dicts else []
             send_detection({
                 "station_id": station_id,
                 "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
                 "detect_count": detect_count,
-                "detections": dets if isinstance(dets, list) else [],
-                "object_count": len(dets) if isinstance(dets, list) else 0,
+                "detections": det_dicts,
+                "object_count": len(det_dicts),
                 "unique_classes": list(set(det_classes)),
             })
 

@@ -15,7 +15,19 @@ active_connections: dict[str, list[WebSocket]] = {}
 
 @router.websocket("/ws/live/{station_id}")
 async def websocket_live(websocket: WebSocket, station_id: str):
-    token = websocket.query_params.get("token")
+    # TODO: 按工位/站点实现访问控制（校验当前用户是否有权订阅该 station_id）
+    await websocket.accept()
+
+    try:
+        raw = await websocket.receive_text()
+    except WebSocketDisconnect:
+        return
+    try:
+        auth_msg = json.loads(raw)
+    except json.JSONDecodeError:
+        await websocket.close(code=4401)
+        return
+    token = auth_msg.get("token") if isinstance(auth_msg, dict) else None
     if not token:
         await websocket.close(code=4401)
         return
@@ -24,8 +36,6 @@ async def websocket_live(websocket: WebSocket, station_id: str):
     except HTTPException:
         await websocket.close(code=4401)
         return
-
-    await websocket.accept()
     if station_id not in active_connections:
         active_connections[station_id] = []
     active_connections[station_id].append(websocket)

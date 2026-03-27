@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
-from typing import Callable
+from collections.abc import Awaitable, Callable
 
 import cv2
 import httpx
@@ -81,7 +81,7 @@ class VLMService:
         detected_objects_per_frame: list[list[str]],
         process_name: str,
         overview: str,
-        on_batch_progress: Callable[[int, int], None] | None = None,
+        on_batch_progress: Callable[[int, int], Awaitable[None]] | None = None,
     ) -> list[dict]:
         """分批分析帧序列，识别具体操作步骤并输出结构化 JSON。"""
         batch_size = 3
@@ -95,7 +95,7 @@ class VLMService:
             batch_objects = detected_objects_per_frame[batch_start:batch_end]
 
             if on_batch_progress:
-                on_batch_progress(batch_idx, total_batches)
+                await on_batch_progress(batch_idx, total_batches)
 
             images_b64 = [self._encode_frame(f) for f in batch_frames]
 
@@ -198,6 +198,20 @@ class VLMService:
                 resp.raise_for_status()
                 data = resp.json()
                 return data["message"]["content"]
+            except httpx.HTTPStatusError as e:
+                last_exc = e
+                if e.response.status_code >= 500 and attempt <= self.max_retries:
+                    wait = 2 ** attempt
+                    logger.warning(
+                        "VLM 请求失败 (HTTP {} 第{}次), {}秒后重试: {}",
+                        e.response.status_code,
+                        attempt,
+                        wait,
+                        e,
+                    )
+                    await asyncio.sleep(wait)
+                else:
+                    raise
             except (httpx.TimeoutException, httpx.ConnectError) as e:
                 last_exc = e
                 if attempt <= self.max_retries:

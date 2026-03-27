@@ -54,8 +54,9 @@ class VideoRecorder:
                 "step": step_index,
                 "timestamp": time.strftime("%Y%m%d_%H%M%S"),
             }
+            clip_path = self._get_clip_path()
         logger.info("触发视频保存: {} SN={} step={}", event_type, work_order_sn, step_index)
-        return self._get_clip_path()
+        return clip_path
 
     def save_snapshot(self, frame, work_order_sn: str, step_index: int) -> str:
         filename = f"{work_order_sn}_step{step_index}_{time.strftime('%Y%m%d_%H%M%S')}.jpg"
@@ -79,6 +80,9 @@ class VideoRecorder:
         h, w = all_frames[0].shape[:2]
         fourcc = cv2.VideoWriter_fourcc(*"mp4v")
         writer = cv2.VideoWriter(clip_path, fourcc, self.fps, (w, h))
+        if not writer.isOpened():
+            logger.error("VideoWriter 无法打开，跳过保存: {}", clip_path)
+            return
         for frame in all_frames:
             writer.write(frame)
         writer.release()

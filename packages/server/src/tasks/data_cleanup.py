@@ -9,6 +9,7 @@ from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.config import settings
+from src.services.storage_service import resolve_minio_bucket_and_object
 from src.core.database import async_session_factory
 from src.models.alert import AlertEvent
 from src.models.cleanup_log import CleanupLog
@@ -49,8 +50,9 @@ def _delete_minio_object(client: Minio, url: str) -> None:
             object_name = parts[4].split("?")[0]
         else:
             return
+    bucket, key = resolve_minio_bucket_and_object(object_name, settings.MINIO_BUCKET_VIDEOS)
     try:
-        client.remove_object(settings.MINIO_BUCKET_VIDEOS, object_name)
+        client.remove_object(bucket, key)
     except S3Error:
         logger.debug("MinIO 对象删除失败（可能已不存在）: {}", object_name)
 

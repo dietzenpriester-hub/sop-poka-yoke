@@ -100,6 +100,8 @@ def _run_mqtt_loop(loop: asyncio.AbstractEventLoop) -> None:
     client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
     client.on_connect = on_connect
     client.on_message = on_message
+    if settings.MQTT_USERNAME and settings.MQTT_PASSWORD:
+        client.username_pw_set(settings.MQTT_USERNAME, settings.MQTT_PASSWORD)
     try:
         client.connect(settings.MQTT_BROKER_HOST, settings.MQTT_BROKER_PORT, 60)
         client.loop_forever()

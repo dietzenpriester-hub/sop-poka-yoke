@@ -19,6 +19,7 @@ import {
   Delete,
 } from "@element-plus/icons-vue";
 import { alertApi } from "@/api/alert";
+import { useAuthStore } from "@/stores/auth";
 
 const router = useRouter();
 const route = useRoute();
@@ -80,7 +81,7 @@ async function refreshBadge() {
 }
 
 function handleLogout() {
-  sessionStorage.removeItem("sop_token");
+  useAuthStore().logout();
   router.push("/login");
 }
 

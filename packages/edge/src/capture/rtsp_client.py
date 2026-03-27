@@ -46,7 +46,21 @@ class RTSPStream:
         return self._buffer.get_last_n(n)
 
     @staticmethod
+    def _validate_gstreamer_rtsp_url(url: str) -> None:
+        if not url.startswith("rtsp://"):
+            raise ValueError("GStreamer 管道仅允许 rtsp:// 开头的 URL")
+        if any(ord(c) < 32 for c in url):
+            raise ValueError("RTSP URL 不得包含控制字符")
+        # 防止未转义传入 shell/GStreamer 管道时产生注入；location= 未加引号时下列字符会破坏或篡改管道
+        _unsafe = set(';|&$`!()<>\\')
+        if any(c in url for c in _unsafe):
+            raise ValueError("RTSP URL 包含不允许的字符（可能对 shell 或 GStreamer 管道不安全）")
+        if " " in url:
+            raise ValueError("RTSP URL 不得包含空格")
+
+    @staticmethod
     def _build_gstreamer_pipeline(url: str) -> str:
+        RTSPStream._validate_gstreamer_rtsp_url(url)
         return (
             f"rtspsrc location={url} latency=100 ! "
             "rtph264depay ! h264parse ! "

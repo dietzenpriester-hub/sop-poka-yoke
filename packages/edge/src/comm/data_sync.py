@@ -5,7 +5,7 @@ from __future__ import annotations
 import heapq
 import io
 import json
-import sqlite3
+import os
 import threading
 import time
 from dataclasses import dataclass, field
@@ -19,8 +19,21 @@ from minio import Minio
 
 class MinIOUploader:
 
-    def __init__(self, endpoint: str = "localhost:9000", access_key: str = "minioadmin",
-                 secret_key: str = "changeme", bucket: str = "sop-videos", secure: bool = False) -> None:
+    def __init__(
+        self,
+        endpoint: str = "localhost:9000",
+        access_key: str | None = None,
+        secret_key: str | None = None,
+        bucket: str = "sop-videos",
+        secure: bool = False,
+    ) -> None:
+        access_key = access_key if access_key is not None else os.environ.get("SOP_MINIO_ACCESS_KEY")
+        secret_key = secret_key if secret_key is not None else os.environ.get("SOP_MINIO_SECRET_KEY")
+        if not access_key or not secret_key:
+            logger.error(
+                "MinIO 凭证未配置：请设置环境变量 SOP_MINIO_ACCESS_KEY 与 SOP_MINIO_SECRET_KEY（无默认密钥）"
+            )
+            raise ValueError("SOP_MINIO_ACCESS_KEY and SOP_MINIO_SECRET_KEY must be set")
         self.client = Minio(endpoint, access_key, secret_key, secure=secure)
         self.bucket = bucket
         self._ensure_bucket()

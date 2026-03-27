@@ -15,17 +15,34 @@ from src.schemas.user import UserCreate, UserPasswordChange, UserResponse, UserU
 router = APIRouter()
 
 
+_PBKDF2_ITERS = 260_000
+_PBKDF2_PREFIX = "pbkdf2:"
+
+
 def _hash_password(password: str, salt: str | None = None) -> str:
     if salt is None:
         salt = secrets.token_hex(16)
-    digest = hashlib.sha256((salt + password).encode("utf-8")).hexdigest()
-    return f"{salt}${digest}"
+    salt_bytes = bytes.fromhex(salt)
+    dk = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt_bytes, _PBKDF2_ITERS)
+    return f"{_PBKDF2_PREFIX}{salt}${dk.hex()}"
 
 
 def _verify_password(password: str, stored_hash: str) -> bool:
+    if stored_hash.startswith(_PBKDF2_PREFIX):
+        body = stored_hash[len(_PBKDF2_PREFIX) :]
+        if "$" not in body:
+            return False
+        salt_part, digest_hex = body.split("$", 1)
+        try:
+            salt_bytes = bytes.fromhex(salt_part)
+        except ValueError:
+            return False
+        dk = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt_bytes, _PBKDF2_ITERS)
+        return secrets.compare_digest(dk.hex(), digest_hex)
     if "$" in stored_hash:
-        salt, _ = stored_hash.split("$", 1)
-        return _hash_password(password, salt) == stored_hash
+        salt, digest = stored_hash.split("$", 1)
+        legacy = hashlib.sha256((salt + password).encode("utf-8")).hexdigest()
+        return secrets.compare_digest(legacy, digest)
     return hashlib.sha256(password.encode("utf-8")).hexdigest() == stored_hash
 
 
