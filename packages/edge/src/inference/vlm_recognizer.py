@@ -20,6 +20,15 @@ class VLMClient:
         self.timeout = timeout
         self.client = httpx.Client(timeout=timeout)
 
+    def close(self) -> None:
+        self.client.close()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        self.close()
+
     def classify_action(self, frames: list[np.ndarray], sop_context: dict) -> dict:
         images_b64 = [self._frame_to_base64(f) for f in frames]
         prompt = self._build_prompt(sop_context)

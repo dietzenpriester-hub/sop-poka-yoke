@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -18,7 +19,23 @@ class WorkOrderResponse(BaseModel):
     sop_template_id: int | None
     status: str
     operator_id: int | None
+    extra: dict | None = None
     start_time: datetime
     end_time: datetime | None
+
+    model_config = {"from_attributes": True}
+
+
+class StepRecordResponse(BaseModel):
+    id: int
+    workorder_id: int
+    step_index: int
+    step_name: str
+    result: str
+    confidence: str
+    snapshot_url: str
+    video_url: str
+    detail: dict[str, Any] | None = None
+    created_at: datetime
 
     model_config = {"from_attributes": True}

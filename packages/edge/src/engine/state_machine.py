@@ -72,7 +72,7 @@ class SOPStateMachine:
         return None
 
     def process_action(self, action_result: dict) -> dict:
-        if self.status not in (SOPStatus.RUNNING, SOPStatus.STEP_OK):
+        if self.status not in (SOPStatus.RUNNING, SOPStatus.STEP_OK, SOPStatus.STEP_NG, SOPStatus.TIMEOUT):
             return {"event": "ignored", "message": "当前状态不接受动作"}
         current_step = self.get_current_step()
         if not current_step:
@@ -144,3 +144,7 @@ class SOPStateMachine:
         self.current_step_index = 0
         self.results = []
         self.work_order_sn = None
+        self.start_time = None
+        self._step_start_time = None
+        self._pending_match = None
+        self._pending_since = 0.0

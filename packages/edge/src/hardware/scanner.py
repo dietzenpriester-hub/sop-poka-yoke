@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import threading
+from collections.abc import Callable
 
 from loguru import logger
 
@@ -22,7 +23,7 @@ class BarcodeScanner:
         self._callback = None
         self._thread: threading.Thread | None = None
 
-    def start(self, on_scan: callable) -> None:
+    def start(self, on_scan: Callable[[str], None]) -> None:
         if serial is None:
             logger.warning("pyserial 未安装，扫码枪功能不可用")
             return

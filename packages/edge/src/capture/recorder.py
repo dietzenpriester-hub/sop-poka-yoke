@@ -34,25 +34,26 @@ class VideoRecorder:
     def feed(self, frame, timestamp: float) -> None:
         with self._lock:
             self._buffer.append((frame.copy(), timestamp))
-        if self._recording_post:
-            self._post_frames.append(frame.copy())
-            self._post_count += 1
-            if self._post_count >= self._post_target:
-                self._save_clip()
+            if self._recording_post:
+                self._post_frames.append(frame.copy())
+                self._post_count += 1
+                if self._post_count >= self._post_target:
+                    self._do_save_clip()
 
     def trigger_save(
         self, event_type: str, work_order_sn: str, step_index: int, post_seconds: int = 5
     ) -> str:
-        self._recording_post = True
-        self._post_frames = []
-        self._post_count = 0
-        self._post_target = post_seconds * self.fps
-        self._save_meta = {
-            "event_type": event_type,
-            "sn": work_order_sn,
-            "step": step_index,
-            "timestamp": time.strftime("%Y%m%d_%H%M%S"),
-        }
+        with self._lock:
+            self._recording_post = True
+            self._post_frames = []
+            self._post_count = 0
+            self._post_target = post_seconds * self.fps
+            self._save_meta = {
+                "event_type": event_type,
+                "sn": work_order_sn,
+                "step": step_index,
+                "timestamp": time.strftime("%Y%m%d_%H%M%S"),
+            }
         logger.info("触发视频保存: {} SN={} step={}", event_type, work_order_sn, step_index)
         return self._get_clip_path()
 
@@ -67,12 +68,12 @@ class VideoRecorder:
         m = self._save_meta
         return str(self.output_dir / f"{m['sn']}_step{m['step']}_{m['event_type']}_{m['timestamp']}.mp4")
 
-    def _save_clip(self) -> None:
+    def _do_save_clip(self) -> None:
         self._recording_post = False
         clip_path = self._get_clip_path()
-        with self._lock:
-            pre_frames = list(self._buffer)
+        pre_frames = list(self._buffer)
         all_frames = [f for f, _ in pre_frames] + self._post_frames
+        self._post_frames = []
         if not all_frames:
             return
         h, w = all_frames[0].shape[:2]

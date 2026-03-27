@@ -1,7 +1,9 @@
 """报警代码定义"""
 
+from enum import StrEnum
 
-class AlertCode:
+
+class AlertCode(StrEnum):
     STEP_SEQUENCE_ERROR = "E001"
     STEP_TIMEOUT = "E002"
     MATERIAL_MISMATCH = "E003"
@@ -13,8 +15,17 @@ class AlertCode:
     SYSTEM_OFFLINE = "C001"
     GPU_OVERHEAT = "C002"
 
+    @property
+    def description(self) -> str:
+        return _DESCRIPTIONS[self]
 
-ALERT_DESCRIPTIONS = {
+    @property
+    def default_severity(self) -> str:
+        prefix = self.value[0]
+        return {"E": "ERROR", "W": "WARN", "I": "INFO", "C": "CRITICAL"}[prefix]
+
+
+_DESCRIPTIONS: dict[AlertCode, str] = {
     AlertCode.STEP_SEQUENCE_ERROR: "步骤顺序错误",
     AlertCode.STEP_TIMEOUT: "步骤超时未完成",
     AlertCode.MATERIAL_MISMATCH: "物料不匹配",
@@ -26,3 +37,6 @@ ALERT_DESCRIPTIONS = {
     AlertCode.SYSTEM_OFFLINE: "系统离线",
     AlertCode.GPU_OVERHEAT: "GPU 温度过高",
 }
+
+# 向后兼容
+ALERT_DESCRIPTIONS = _DESCRIPTIONS

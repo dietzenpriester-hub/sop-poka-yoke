@@ -6,7 +6,7 @@
   "required": ["sn", "station_id", "status"],
   "properties": {
     "sn": { "type": "string" },
-    "station_id": { "type": "string" },
+    "station_id": { "type": "string", "pattern": "^[a-zA-Z0-9_-]+$" },
     "sop_template_id": { "type": "integer" },
     "status": {
       "type": "string",

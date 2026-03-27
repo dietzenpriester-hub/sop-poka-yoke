@@ -9,6 +9,8 @@ services:
       - pgdata:/var/lib/postgresql/data
     ports:
       - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sop_admin -d sop_pokayoke"]
     restart: unless-stopped
 
   redis:
@@ -16,10 +18,12 @@ services:
     command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
     ports:
       - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
     restart: unless-stopped
 
   minio:
-    image: minio/minio:latest
+    image: minio/minio:RELEASE.2024-11-07T00-52-20Z
     environment:
       MINIO_ROOT_USER: minioadmin
       MINIO_ROOT_PASSWORD: ${MINIO_PASSWORD:-changeme}
@@ -52,10 +56,14 @@ services:
       SOP_MINIO_ACCESS_KEY: minioadmin
       SOP_MINIO_SECRET_KEY: ${MINIO_PASSWORD:-changeme}
     depends_on:
-      - postgres
-      - redis
-      - mqtt
-      - minio
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      mqtt:
+        condition: service_started
+      minio:
+        condition: service_started
     ports:
       - "8000:8000"
     restart: unless-stopped
@@ -80,6 +88,8 @@ services:
 
   grafana:
     image: grafana/grafana:11.3.0
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-changeme}
     ports:
       - "3000:3000"
     depends_on:

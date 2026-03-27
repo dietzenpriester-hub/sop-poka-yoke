@@ -32,11 +32,15 @@ class TabletWebSocketServer:
 
     async def broadcast(self, data: dict[str, Any]) -> None:
         message = json.dumps(data, ensure_ascii=False)
+        dead_clients = []
         for ws in list(self._clients):
             try:
                 await ws.send_str(message)
             except Exception:
-                pass
+                dead_clients.append(ws)
+        for ws in dead_clients:
+            if ws in self._clients:
+                self._clients.remove(ws)
 
     async def start(self) -> None:
         app = aiohttp.web.Application()

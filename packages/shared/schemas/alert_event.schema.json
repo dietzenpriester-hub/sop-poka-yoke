@@ -5,10 +5,13 @@
   "type": "object",
   "required": ["station_id", "alert_code", "severity", "ts_unix"],
   "properties": {
-    "station_id": { "type": "string" },
+    "station_id": { "type": "string", "pattern": "^[a-zA-Z0-9_-]+$" },
     "work_order_sn": { "type": "string" },
-    "step_index": { "type": "integer" },
-    "alert_code": { "type": "string" },
+    "step_index": { "type": "integer", "minimum": 0 },
+    "alert_code": {
+      "type": "string",
+      "enum": ["E001", "E002", "E003", "E004", "W001", "W002", "I001", "I002", "C001", "C002"]
+    },
     "severity": { "type": "string", "enum": ["INFO", "WARN", "ERROR", "CRITICAL"] },
     "message": { "type": "string" },
     "ts_unix": { "type": "number" },

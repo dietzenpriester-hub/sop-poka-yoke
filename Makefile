@@ -30,6 +30,7 @@ db-migrate:
 	cd packages/server && alembic upgrade head
 
 db-revision:
+	@if [ -z "$(msg)" ]; then echo "用法: make db-revision msg=\"描述\""; exit 1; fi
 	cd packages/server && alembic revision --autogenerate -m "$(msg)"
 
 # === 协议生成 ===

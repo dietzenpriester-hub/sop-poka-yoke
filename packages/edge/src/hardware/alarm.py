@@ -35,8 +35,12 @@ class ModbusAlertController:
         if not self._client or not self._client.is_socket_open():
             self.connect()
         if self._client:
-            self._client.write_register(self.light_reg, color.value)
-            self._client.write_register(self.buzzer_reg, 1 if buzzer else 0)
+            resp_light = self._client.write_register(self.light_reg, color.value)
+            if resp_light.isError():
+                logger.error("Modbus 写灯寄存器失败: {}", resp_light)
+            resp_buzzer = self._client.write_register(self.buzzer_reg, 1 if buzzer else 0)
+            if resp_buzzer.isError():
+                logger.error("Modbus 写蜂鸣器寄存器失败: {}", resp_buzzer)
 
     def alert_ok(self) -> None:
         self.set_status(LightColor.GREEN, buzzer=False)

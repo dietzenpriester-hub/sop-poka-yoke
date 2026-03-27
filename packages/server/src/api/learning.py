@@ -1,46 +1,122 @@
-"""SOP 学习模块 API"""
+"""SOP 学习模块 API — 增强版"""
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
-from sqlalchemy import select
+import os
+import shutil
+import tempfile
+import uuid
+
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+from minio import Minio
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.core.config import settings
 from src.core.database import get_db
-from src.models.sop import SOPTemplate
+from src.core.security import get_current_user
+from src.schemas.learning import (
+    LearningTaskListResponse,
+    LearningTaskResponse,
+    StepsUpdateRequest,
+    TaskCreateResponse,
+)
 from src.services.learning_service import LearningService
 
 router = APIRouter()
+_service = LearningService()
 
 
-@router.post("/upload-video")
+@router.post("/upload-video", response_model=TaskCreateResponse)
 async def upload_standard_video(
     product_model: str,
     process_name: str,
     video: UploadFile = File(...),
     db: AsyncSession = Depends(get_db),
+    _: dict = Depends(get_current_user),
 ):
     if not video.content_type or not video.content_type.startswith("video/"):
         raise HTTPException(400, "仅支持视频文件")
-    service = LearningService()
-    task_id = await service.create_analysis_task(
-        product_model=product_model, process_name=process_name, video=video, db=db,
+    # Upload to MinIO
+    client = Minio(settings.MINIO_ENDPOINT, settings.MINIO_ACCESS_KEY, settings.MINIO_SECRET_KEY, secure=False)
+    bucket = "sop-learning"
+    if not client.bucket_exists(bucket):
+        client.make_bucket(bucket)
+
+    object_name = f"{product_model}/{process_name}/{uuid.uuid4()}.mp4"
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as tmp:
+        tmp_path = tmp.name
+        shutil.copyfileobj(video.file, tmp)
+    try:
+        length = os.path.getsize(tmp_path)
+        with open(tmp_path, "rb") as f:
+            client.put_object(bucket, object_name, f, length, "video/mp4")
+    finally:
+        os.unlink(tmp_path)
+
+    video_path = f"{bucket}/{object_name}"
+    task_id = await _service.create_task(product_model, process_name, video_path, db)
+    return TaskCreateResponse(task_id=task_id, status="queued")
+
+
+@router.get("/tasks", response_model=LearningTaskListResponse)
+async def list_tasks(
+    skip: int = Query(default=0, ge=0),
+    limit: int = Query(default=20, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+    _: dict = Depends(get_current_user),
+):
+    tasks, total = await _service.list_tasks(db, skip, limit)
+    return LearningTaskListResponse(
+        items=[LearningTaskResponse.model_validate(t) for t in tasks],
+        total=total,
     )
-    return {"task_id": task_id, "status": "queued"}
 
 
-@router.get("/task/{task_id}")
-async def get_analysis_status(task_id: str):
-    service = LearningService()
-    return service.get_task_status(task_id)
+@router.get("/task/{task_id}", response_model=LearningTaskResponse)
+async def get_task(
+    task_id: str,
+    db: AsyncSession = Depends(get_db),
+    _: dict = Depends(get_current_user),
+):
+    task = await _service.get_task(task_id, db)
+    if not task:
+        raise HTTPException(404, "任务不存在")
+    return LearningTaskResponse.model_validate(task)
 
 
-@router.post("/generate-template/{task_id}")
-async def generate_sop_template(task_id: str, db: AsyncSession = Depends(get_db)):
-    service = LearningService()
-    template = await service.generate_template(task_id, db)
-    return template
+@router.put("/task/{task_id}/steps")
+async def update_steps(
+    task_id: str,
+    body: StepsUpdateRequest,
+    db: AsyncSession = Depends(get_db),
+    _: dict = Depends(get_current_user),
+):
+    try:
+        task = await _service.update_steps(task_id, [s.model_dump() for s in body.steps], db)
+        return {"task_id": task.task_id, "step_count": len(task.steps or [])}
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
 
 
-@router.get("/templates/draft", response_model=list[dict])
-async def list_draft_templates(db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(SOPTemplate).where(SOPTemplate.version == "draft"))
-    return [{"id": t.id, "name": t.name, "product_model": t.product_model} for t in result.scalars().all()]
+@router.post("/task/{task_id}/confirm")
+async def confirm_task(
+    task_id: str,
+    db: AsyncSession = Depends(get_db),
+    _: dict = Depends(get_current_user),
+):
+    try:
+        result = await _service.confirm_and_generate(task_id, db)
+        return result
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+
+
+@router.delete("/task/{task_id}")
+async def delete_task(
+    task_id: str,
+    db: AsyncSession = Depends(get_db),
+    _: dict = Depends(get_current_user),
+):
+    try:
+        await _service.delete_task(task_id, db)
+        return {"message": "已删除"}
+    except ValueError as e:
+        raise HTTPException(404, str(e)) from e

@@ -96,7 +96,12 @@ class OfflineDataSync:
                     time.sleep(0.05)
                 self._sender(task.payload)
             except Exception as e:
-                logger.exception("补传发送失败，重新入队: {}", e)
+                retries = getattr(task, "_retries", 0) + 1
+                if retries >= 5:
+                    logger.error("补传任务超过最大重试次数，丢弃: {}", e)
+                    continue
+                task._retries = retries
+                logger.warning("补传发送失败 ({}/5)，重新入队: {}", retries, e)
                 with self._lock:
                     heapq.heappush(self._queue, task)
 

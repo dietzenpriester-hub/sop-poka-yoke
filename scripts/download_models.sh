@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# 检查依赖
+if ! command -v ollama &>/dev/null; then
+    echo "错误: 未安装 ollama，请先安装: https://ollama.ai"
+    exit 1
+fi
+
 echo "=== 下载 AI 模型 ==="
 
 # Ollama 模型

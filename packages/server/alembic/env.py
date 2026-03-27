@@ -18,6 +18,8 @@ import src.models.user  # noqa: F401
 import src.models.material_check  # noqa: F401
 import src.models.completion_check  # noqa: F401
 import src.models.override_log  # noqa: F401
+import src.models.cleanup_log  # noqa: F401
+import src.models.learning_task  # noqa: F401
 
 config = context.config
 if config.config_file_name is not None:

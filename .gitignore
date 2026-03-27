@@ -44,3 +44,11 @@ docker-compose.override.yml
 # OS
 .DS_Store
 Thumbs.db
+
+# 测试覆盖
+.coverage
+htmlcov/
+
+# 本地数据库
+*.sqlite
+*.sqlite3

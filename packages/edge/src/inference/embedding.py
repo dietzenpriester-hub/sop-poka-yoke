@@ -12,13 +12,19 @@ class ActionEmbeddingComparator:
         self.reference_embeddings: dict[int, np.ndarray] = {}
 
     def set_reference(self, step_index: int, embedding: np.ndarray) -> None:
-        self.reference_embeddings[step_index] = embedding / np.linalg.norm(embedding)
+        norm = np.linalg.norm(embedding)
+        if norm < 1e-8:
+            raise ValueError(f"参考 embedding 范数接近零: step_index={step_index}")
+        self.reference_embeddings[step_index] = embedding / norm
 
     def compare(self, step_index: int, current_embedding: np.ndarray) -> dict:
         if step_index not in self.reference_embeddings:
             return {"similarity": 0.0, "status": "UNKNOWN"}
         ref = self.reference_embeddings[step_index]
-        cur = current_embedding / np.linalg.norm(current_embedding)
+        norm = np.linalg.norm(current_embedding)
+        if norm < 1e-8:
+            return {"similarity": 0.0, "status": "UNKNOWN"}
+        cur = current_embedding / norm
         similarity = float(np.dot(ref, cur))
         if similarity >= self.similarity_threshold:
             status = "OK"

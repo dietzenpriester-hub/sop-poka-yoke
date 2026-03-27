@@ -8,8 +8,11 @@ from src.models.user import UserAccount
 from src.models.material_check import MaterialCheck
 from src.models.completion_check import CompletionCheck
 from src.models.override_log import OverrideLog
+from src.models.cleanup_log import CleanupLog
+from src.models.learning_task import LearningTask
 
 __all__ = [
     "SOPTemplate", "WorkOrder", "StepRecord", "AlertEvent",
     "Station", "UserAccount", "MaterialCheck", "CompletionCheck", "OverrideLog",
+    "CleanupLog", "LearningTask",
 ]

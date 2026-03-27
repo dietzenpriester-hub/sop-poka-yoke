@@ -8,7 +8,11 @@ docker compose up -d postgres redis minio mqtt
 
 # 2. 等待 PostgreSQL 就绪
 echo "等待 PostgreSQL 启动..."
-sleep 5
+until docker compose exec -T postgres pg_isready -U sop_admin -d sop_pokayoke 2>/dev/null; do
+    echo "  PostgreSQL 未就绪，等待..."
+    sleep 2
+done
+echo "PostgreSQL 已就绪"
 
 # 3. 数据库迁移
 echo "执行数据库迁移..."

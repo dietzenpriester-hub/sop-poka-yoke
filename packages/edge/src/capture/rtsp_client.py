@@ -37,8 +37,6 @@ class RTSPStream:
         self._running = False
         if self._thread:
             self._thread.join(timeout=3)
-        if self._cap:
-            self._cap.release()
         logger.info("视频流已停止")
 
     def get_frame(self):

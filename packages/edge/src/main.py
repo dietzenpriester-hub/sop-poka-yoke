@@ -19,8 +19,6 @@ from src.hardware.alarm import LightColor, ModbusAlertController
 from src.inference.vlm_recognizer import VLMClient
 from src.inference.yolo_detector import ObjectTracker, YOLODetector
 
-logger.add("logs/edge_{time}.log", rotation="100 MB", retention="30 days", compression="gz", level="INFO")
-
 
 def _load_sop_template() -> dict:
     """实际项目从 Redis/SQLite/HTTP 拉取；此处占位。"""
@@ -35,6 +33,13 @@ def _load_sop_template() -> dict:
 
 def main() -> None:
     repo_root = Path(__file__).resolve().parents[3]
+    logger.add(
+        str(repo_root / "logs/edge_{time}.log"),
+        rotation="100 MB",
+        retention="30 days",
+        compression="gz",
+        level="INFO",
+    )
     rtsp_url = os.environ.get("SOP_RTSP_URL", "rtsp://192.168.1.64/stream1")
     station_id = os.environ.get("SOP_STATION_ID", "ST-01")
 
@@ -77,6 +82,10 @@ def main() -> None:
 
     try:
         while True:
+            timeout_evt = fsm.check_timeout()
+            if timeout_evt:
+                logger.warning("SOP 步骤超时: {}", timeout_evt)
+                alerter.alert_error()
             item = stream.get_frame()
             if item is None:
                 time.sleep(0.01)
