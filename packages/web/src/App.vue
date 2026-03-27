@@ -42,6 +42,7 @@ const menuItems = [
 ];
 
 async function refreshBadge() {
+  if (!sessionStorage.getItem("sop_token")) return;
   try {
     const { data } = await alertApi.unacknowledgedCount();
     unacknowledgedCount.value = data.count;
