@@ -169,11 +169,7 @@ onUnmounted(() => {
       </el-header>
 
       <el-main class="app-content">
-        <RouterView v-slot="{ Component }">
-          <transition name="fade-slide" mode="out-in">
-            <component :is="Component" />
-          </transition>
-        </RouterView>
+        <RouterView />
       </el-main>
     </el-container>
   </el-container>

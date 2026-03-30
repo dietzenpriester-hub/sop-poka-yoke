@@ -8,6 +8,7 @@ import { parseErrorMsg } from "@/utils/httpError";
 import { formatDateTime } from "@/utils/date";
 
 const workorders = ref<WorkOrderItem[]>([]);
+const totalWorkorders = ref(0);
 const loading = ref(false);
 const stations = ref<StationItem[]>([]);
 const templates = ref<SOPTemplate[]>([]);
@@ -86,7 +87,8 @@ async function loadWorkorders() {
       params.end_date = filters.value.dateRange[1];
     }
     const { data } = await workorderApi.list(params as Parameters<typeof workorderApi.list>[0]);
-    workorders.value = data;
+    workorders.value = data.items;
+    totalWorkorders.value = data.total;
   } catch (e: unknown) {
     ElMessage.error(parseErrorMsg(e, "加载工单列表失败"));
   } finally {

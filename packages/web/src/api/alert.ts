@@ -27,7 +27,7 @@ export const alertApi = {
     acknowledged?: string;
     skip?: number;
     limit?: number;
-  }) => api.get<AlertItem[]>("/alert/", { params }),
+  }) => api.get<{ items: AlertItem[]; total: number }>("/alert/", { params }),
 
   get: (id: number) => api.get<AlertItem>(`/alert/${id}`),
 

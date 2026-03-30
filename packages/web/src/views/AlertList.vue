@@ -31,7 +31,7 @@ async function loadAlerts() {
     if (filters.value.acknowledged) params.acknowledged = filters.value.acknowledged;
     const { data } = await alertApi.list(params as Parameters<typeof alertApi.list>[0]);
     if (reqId !== alertReqId) return;
-    alerts.value = data;
+    alerts.value = data.items;
   } catch (e: unknown) {
     if (reqId !== alertReqId) return;
     ElMessage.error(parseErrorMsg(e, "加载报警列表失败"));

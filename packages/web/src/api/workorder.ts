@@ -34,7 +34,7 @@ export const workorderApi = {
     end_date?: string;
     skip?: number;
     limit?: number;
-  }) => api.get<WorkOrderItem[]>("/workorder/", { params }),
+  }) => api.get<{ items: WorkOrderItem[]; total: number }>("/workorder/", { params }),
   get: (id: number) => api.get<WorkOrderItem>(`/workorder/${id}`),
   create: (data: { sn: string; station_id?: number; sop_template_id?: number; operator_id?: number }) =>
     api.post<WorkOrderItem>("/workorder/", data),
