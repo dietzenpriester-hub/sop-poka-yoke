@@ -79,10 +79,12 @@ onMounted(() => loadClips());
 
 <template>
   <div>
-    <h2>视频回放</h2>
+    <div class="page-header">
+      <h2>视频回放</h2>
+    </div>
 
     <!-- 搜索筛选 -->
-    <el-card style="margin-top: 16px">
+    <el-card class="filter-card">
       <el-form inline>
         <el-form-item label="工单 SN">
           <el-input v-model="filters.sn" placeholder="模糊搜索" clearable style="width: 160px" />
@@ -115,9 +117,15 @@ onMounted(() => loadClips());
     </el-card>
 
     <!-- 视频列表 -->
-    <el-row :gutter="16" style="margin-top: 16px" v-loading="loading">
+    <el-row :gutter="16" v-loading="loading">
       <el-col v-for="clip in clips" :key="clip.id" :xs="24" :sm="12" :md="8" :lg="6" style="margin-bottom: 16px">
-        <el-card shadow="hover" :body-style="{ padding: '0' }" @click="playClip(clip)" style="cursor: pointer">
+        <el-card
+          class="section-card"
+          shadow="hover"
+          :body-style="{ padding: '0' }"
+          @click="playClip(clip)"
+          style="cursor: pointer"
+        >
           <div style="height: 160px; background: #1a1a2e; display: flex; align-items: center; justify-content: center; color: #fff; position: relative">
             <img v-if="clip.snapshot_url" :src="clip.snapshot_url" style="width: 100%; height: 100%; object-fit: cover" />
             <div v-else style="font-size: 48px; opacity: 0.3">&#9654;</div>
@@ -156,11 +164,11 @@ onMounted(() => loadClips());
     <el-empty v-if="!loading && clips.length === 0" description="暂无视频记录" />
 
     <!-- 分页 -->
-    <div v-if="clips.length > 0" style="margin-top: 16px; display: flex; justify-content: flex-end">
+    <div v-if="clips.length > 0" class="pagination-bar">
       <el-button :disabled="pagination.skip === 0" @click="pagination.skip = Math.max(0, pagination.skip - pagination.limit); loadClips()">
         上一页
       </el-button>
-      <span style="line-height: 32px; margin: 0 12px; color: #666">
+      <span class="page-info">
         第 {{ Math.floor(pagination.skip / pagination.limit) + 1 }} 页
       </span>
       <el-button :disabled="clips.length < pagination.limit" @click="pagination.skip += pagination.limit; loadClips()">

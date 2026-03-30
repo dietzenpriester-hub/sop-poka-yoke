@@ -110,9 +110,9 @@ onMounted(() => loadUsers());
 
 <template>
   <div>
-    <div style="display: flex; justify-content: space-between; align-items: center">
+    <div class="page-header">
       <h2>用户管理</h2>
-      <div>
+      <div class="page-header-actions">
         <el-select v-model="roleFilter" clearable placeholder="角色筛选" style="width: 120px; margin-right: 8px" @change="loadUsers">
           <el-option label="管理员" value="admin" />
           <el-option label="主管" value="supervisor" />
@@ -122,7 +122,8 @@ onMounted(() => loadUsers());
       </div>
     </div>
 
-    <el-table :data="users" v-loading="loading" style="margin-top: 16px">
+    <div class="data-table">
+      <el-table :data="users" v-loading="loading" style="margin-top: 16px">
       <el-table-column prop="id" label="ID" width="70" />
       <el-table-column prop="username" label="用户名" width="120" />
       <el-table-column prop="display_name" label="姓名" width="120" />
@@ -143,6 +144,7 @@ onMounted(() => loadUsers());
         </template>
       </el-table-column>
     </el-table>
+    </div>
 
     <!-- 创建对话框 -->
     <el-dialog v-model="showCreateDialog" title="新增用户" width="480px">

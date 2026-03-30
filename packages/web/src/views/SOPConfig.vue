@@ -247,13 +247,16 @@ onMounted(loadTemplates);
 
 <template>
   <div>
-    <div style="display: flex; justify-content: space-between; align-items: center">
+    <div class="page-header">
       <h2>SOP 模板管理</h2>
-      <el-button type="primary" @click="openCreateDialog">新建模板</el-button>
+      <div class="page-header-actions">
+        <el-button type="primary" @click="openCreateDialog">新建模板</el-button>
+      </div>
     </div>
 
-    <el-table :data="templates" v-loading="loading" style="margin-top: 20px">
-      <el-table-column prop="id" label="ID" width="80" />
+    <div class="data-table">
+      <el-table :data="templates" v-loading="loading">
+        <el-table-column prop="id" label="ID" width="80" />
       <el-table-column prop="name" label="名称" min-width="120" />
       <el-table-column prop="version" label="版本" width="100" />
       <el-table-column prop="product_model" label="产品型号" min-width="120" />
@@ -270,7 +273,8 @@ onMounted(loadTemplates);
           <el-button size="small" type="danger" @click="handleDelete(row.id)">删除</el-button>
         </template>
       </el-table-column>
-    </el-table>
+      </el-table>
+    </div>
 
     <el-dialog
       v-model="dialogVisible"

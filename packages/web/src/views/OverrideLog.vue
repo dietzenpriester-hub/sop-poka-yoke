@@ -120,31 +120,33 @@ onMounted(() => {
       style="margin-bottom: 16px"
     />
 
-    <div style="display: flex; justify-content: space-between; align-items: center">
-      <h2 style="margin: 0">强制放行审计</h2>
-      <el-button type="primary" :loading="statsLoading || listLoading" @click="loadStats(); loadList()">
-        刷新
-      </el-button>
+    <div class="page-header">
+      <h2>强制放行审计</h2>
+      <div class="page-header-actions">
+        <el-button type="primary" :loading="statsLoading || listLoading" @click="loadStats(); loadList()">
+          刷新
+        </el-button>
+      </div>
     </div>
 
     <!-- 统计 -->
     <el-row :gutter="16" style="margin-top: 16px" v-loading="statsLoading">
       <el-col :xs="24" :md="6">
-        <el-card shadow="hover">
+        <el-card shadow="hover" class="stat-card">
           <template #header>总放行次数</template>
-          <div style="font-size: 32px; font-weight: bold; color: #e6a23c">
+          <div class="stat-value" :style="{ color: '#e6a23c' }">
             {{ stats?.total ?? 0 }}
           </div>
         </el-card>
       </el-col>
       <el-col :xs="24" :md="12">
-        <el-card shadow="hover">
+        <el-card shadow="hover" class="section-card">
           <template #header>趋势（近 30 天）</template>
           <div ref="trendChartRef" style="height: 320px; width: 100%" />
         </el-card>
       </el-col>
       <el-col :xs="24" :md="6">
-        <el-card shadow="hover">
+        <el-card shadow="hover" class="section-card">
           <template #header>高频放行操作员</template>
           <el-table :data="stats?.top_operators ?? []" size="small" max-height="260">
             <el-table-column prop="badge" label="工牌" show-overflow-tooltip />
@@ -158,7 +160,7 @@ onMounted(() => {
     </el-row>
 
     <!-- 筛选 -->
-    <el-card shadow="never" style="margin-top: 16px">
+    <el-card class="filter-card" shadow="never">
       <el-form :inline="true" @submit.prevent="handleSearch">
         <el-form-item label="工单 ID">
           <el-input-number v-model="filters.workorder_id" :min="1" :controls="false" placeholder="工单 ID" clearable style="width: 140px" />
@@ -186,7 +188,8 @@ onMounted(() => {
     </el-card>
 
     <!-- 表格 -->
-    <el-table :data="rows" v-loading="listLoading" style="margin-top: 16px" border>
+    <div class="data-table">
+    <el-table :data="rows" v-loading="listLoading" border>
       <el-table-column prop="id" label="ID" width="70" />
       <el-table-column prop="workorder_id" label="工单 ID" width="100" />
       <el-table-column prop="step_index" label="步骤序号" width="100" />
@@ -214,8 +217,9 @@ onMounted(() => {
         <template #default="{ row }">{{ formatDateTime(row.created_at) }}</template>
       </el-table-column>
     </el-table>
+    </div>
 
-    <div style="margin-top: 16px; display: flex; justify-content: flex-end">
+    <div class="pagination-bar">
       <el-pagination
         v-model:current-page="page"
         v-model:page-size="pageSize"

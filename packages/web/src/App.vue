@@ -17,6 +17,7 @@ import {
   Expand,
   Fold,
   Delete,
+  SwitchButton,
 } from "@element-plus/icons-vue";
 import { alertApi } from "@/api/alert";
 import { useAuthStore } from "@/stores/auth";
@@ -69,6 +70,11 @@ const menuItems = computed(() =>
   allMenuItems.filter((item) => !item.meta?.requiresAdmin || isAdmin.value)
 );
 
+const currentPageTitle = computed(() => {
+  const found = allMenuItems.find((m) => m.path === route.path);
+  return found?.label || "";
+});
+
 const auth = useAuthStore();
 
 async function refreshBadge() {
@@ -101,45 +107,74 @@ onUnmounted(() => {
     <RouterView />
   </template>
 
-  <el-container v-else style="height: 100vh">
-    <el-aside :width="isCollapse ? '64px' : '200px'" style="transition: width 0.3s">
-      <div style="padding: 16px; text-align: center; font-weight: bold; font-size: 16px; color: #409eff">
-        <span v-if="!isCollapse">SOP 防呆系统</span>
-        <span v-else>SOP</span>
+  <el-container v-else class="app-layout">
+    <el-aside :width="isCollapse ? '64px' : '220px'" class="app-sidebar">
+      <div class="sidebar-brand">
+        <svg class="sidebar-logo" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <rect x="2" y="2" width="28" height="28" rx="7" fill="rgba(64,158,255,0.2)" />
+          <path d="M10 16l5 5 7-9" stroke="#409eff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" />
+        </svg>
+        <transition name="brand-fade">
+          <span v-if="!isCollapse" class="sidebar-brand-text">SOP 防呆</span>
+        </transition>
       </div>
-      <el-menu
-        router
-        :collapse="isCollapse"
-        :default-active="$route.path"
-        background-color="#001529"
-        text-color="#ffffffa6"
-        active-text-color="#409eff"
-      >
-        <el-menu-item v-for="item in menuItems" :key="item.path" :index="item.path">
-          <el-icon><component :is="item.icon" /></el-icon>
-          <template #title>{{ item.label }}</template>
-        </el-menu-item>
-      </el-menu>
+
+      <el-scrollbar class="sidebar-scroll">
+        <el-menu
+          router
+          :collapse="isCollapse"
+          :default-active="$route.path"
+          background-color="transparent"
+          text-color="rgba(255,255,255,0.65)"
+          active-text-color="#ffffff"
+          :collapse-transition="false"
+          class="sidebar-menu"
+        >
+          <el-menu-item v-for="item in menuItems" :key="item.path" :index="item.path">
+            <el-icon><component :is="item.icon" /></el-icon>
+            <template #title>{{ item.label }}</template>
+          </el-menu-item>
+        </el-menu>
+      </el-scrollbar>
     </el-aside>
 
-    <el-container>
-      <el-header style="display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #eee">
-        <el-button text @click="isCollapse = !isCollapse">
-          <el-icon :size="18"><component :is="isCollapse ? Expand : Fold" /></el-icon>
-        </el-button>
-        <div style="display: flex; align-items: center; gap: 16px">
+    <el-container class="app-main-container">
+      <el-header class="app-header">
+        <div class="header-left">
+          <el-button text class="collapse-btn" @click="isCollapse = !isCollapse">
+            <el-icon :size="18"><component :is="isCollapse ? Expand : Fold" /></el-icon>
+          </el-button>
+          <span class="header-page-title">{{ currentPageTitle }}</span>
+        </div>
+
+        <div class="header-right">
           <el-badge :value="unacknowledgedCount" :hidden="unacknowledgedCount === 0" type="danger">
-            <el-button text @click="router.push('/alerts')">
-              <el-icon :size="20"><Bell /></el-icon>
+            <el-button text class="header-icon-btn" @click="router.push('/alerts')">
+              <el-icon :size="18"><Bell /></el-icon>
             </el-button>
           </el-badge>
-          <span style="color: #999; font-size: 14px">SOP 防呆系统 v1.0.0</span>
-          <el-button text type="danger" size="small" @click="handleLogout">退出</el-button>
+          <el-tag
+            size="small"
+            :type="isAdmin ? 'warning' : 'info'"
+            effect="plain"
+            round
+            class="header-role-tag"
+          >
+            {{ isAdmin ? "管理员" : "操作员" }}
+          </el-tag>
+          <el-button text type="danger" class="header-logout-btn" @click="handleLogout">
+            <el-icon :size="16" style="margin-right: 4px"><SwitchButton /></el-icon>
+            退出
+          </el-button>
         </div>
       </el-header>
 
-      <el-main>
-        <RouterView />
+      <el-main class="app-content">
+        <RouterView v-slot="{ Component }">
+          <transition name="fade-slide" mode="out-in">
+            <component :is="Component" />
+          </transition>
+        </RouterView>
       </el-main>
     </el-container>
   </el-container>
@@ -148,11 +183,175 @@ onUnmounted(() => {
 <style>
 body {
   margin: 0;
-  font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-family: -apple-system, "PingFang SC", "Microsoft YaHei", "Helvetica Neue", sans-serif;
 }
 
-.el-aside {
-  background-color: #001529;
+.app-layout {
+  height: 100vh;
+}
+
+.app-sidebar {
+  background: linear-gradient(180deg, #001529 0%, #001d3d 100%);
   overflow: hidden;
+  transition: width var(--sop-transition);
+  border-right: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.sidebar-brand {
+  height: var(--sop-header-h);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 0 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.sidebar-logo {
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+}
+
+.sidebar-brand-text {
+  font-size: 16px;
+  font-weight: 700;
+  color: #ffffff;
+  letter-spacing: 2px;
+  white-space: nowrap;
+}
+
+.brand-fade-enter-active,
+.brand-fade-leave-active {
+  transition: opacity 0.2s, transform 0.2s;
+}
+
+.brand-fade-enter-from,
+.brand-fade-leave-to {
+  opacity: 0;
+  transform: translateX(-8px);
+}
+
+.sidebar-scroll {
+  height: calc(100vh - var(--sop-header-h));
+}
+
+.sidebar-menu {
+  border-right: none !important;
+  padding: 8px;
+}
+
+.sidebar-menu .el-menu-item {
+  border-radius: 8px;
+  margin-bottom: 2px;
+  height: 44px;
+  line-height: 44px;
+  font-size: 14px;
+  transition: all 0.2s;
+}
+
+.sidebar-menu .el-menu-item:hover {
+  background: rgba(255, 255, 255, 0.06) !important;
+}
+
+.sidebar-menu .el-menu-item.is-active {
+  background: rgba(64, 158, 255, 0.15) !important;
+  color: #409eff !important;
+  font-weight: 600;
+}
+
+.sidebar-menu .el-menu-item.is-active::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+  height: 20px;
+  border-radius: 0 3px 3px 0;
+  background: #409eff;
+}
+
+.app-header {
+  height: var(--sop-header-h) !important;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 20px !important;
+  background: #ffffff;
+  border-bottom: 1px solid #f0f0f0;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.04);
+}
+
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.collapse-btn {
+  color: #606266 !important;
+  padding: 6px !important;
+  border-radius: 6px !important;
+}
+
+.collapse-btn:hover {
+  background: #f5f5f5 !important;
+}
+
+.header-page-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: #1d2129;
+}
+
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.header-icon-btn {
+  color: #606266 !important;
+  padding: 6px !important;
+  border-radius: 6px !important;
+}
+
+.header-icon-btn:hover {
+  background: #f5f5f5 !important;
+}
+
+.header-role-tag {
+  font-size: 12px !important;
+}
+
+.header-logout-btn {
+  font-size: 13px !important;
+}
+
+.app-content {
+  background: var(--sop-bg);
+  padding: 20px !important;
+  overflow-y: auto;
+}
+
+.app-content::-webkit-scrollbar {
+  width: 6px;
+}
+
+.app-content::-webkit-scrollbar-thumb {
+  background: #d4d4d4;
+  border-radius: 3px;
+}
+
+.app-content::-webkit-scrollbar-thumb:hover {
+  background: #b0b0b0;
+}
+
+@media (max-width: 768px) {
+  .header-role-tag,
+  .header-page-title {
+    display: none;
+  }
 }
 </style>

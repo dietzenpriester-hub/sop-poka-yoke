@@ -95,45 +95,47 @@ onMounted(() => {
 
 <template>
   <div>
-    <div style="display: flex; justify-content: space-between; align-items: center">
+    <div class="page-header">
       <h2>物料校验记录</h2>
-      <el-button type="primary" @click="loadList(); loadStats()" :loading="loading">刷新</el-button>
+      <div class="page-header-actions">
+        <el-button type="primary" @click="loadList(); loadStats()" :loading="loading">刷新</el-button>
+      </div>
     </div>
 
     <el-row :gutter="16" style="margin-top: 16px">
       <el-col :xs="12" :sm="8" :md="5">
-        <el-card shadow="hover">
+        <el-card shadow="hover" class="stat-card">
           <template #header>检验总数</template>
-          <div style="font-size: 28px; font-weight: bold; color: #409eff">{{ stats.total }}</div>
+          <div class="stat-value" :style="{ color: '#409eff' }">{{ stats.total }}</div>
         </el-card>
       </el-col>
       <el-col :xs="12" :sm="8" :md="5">
-        <el-card shadow="hover">
+        <el-card shadow="hover" class="stat-card">
           <template #header>OK 数</template>
-          <div style="font-size: 28px; font-weight: bold; color: #67c23a">{{ stats.ok_count }}</div>
+          <div class="stat-value" :style="{ color: '#67c23a' }">{{ stats.ok_count }}</div>
         </el-card>
       </el-col>
       <el-col :xs="12" :sm="8" :md="5">
-        <el-card shadow="hover">
+        <el-card shadow="hover" class="stat-card">
           <template #header>NG 数</template>
-          <div style="font-size: 28px; font-weight: bold; color: #f56c6c">{{ stats.ng_count }}</div>
+          <div class="stat-value" :style="{ color: '#f56c6c' }">{{ stats.ng_count }}</div>
         </el-card>
       </el-col>
       <el-col :xs="12" :sm="8" :md="5">
-        <el-card shadow="hover">
+        <el-card shadow="hover" class="stat-card">
           <template #header>WARN 数</template>
-          <div style="font-size: 28px; font-weight: bold; color: #e6a23c">{{ stats.warn_count }}</div>
+          <div class="stat-value" :style="{ color: '#e6a23c' }">{{ stats.warn_count }}</div>
         </el-card>
       </el-col>
       <el-col :xs="12" :sm="8" :md="4">
-        <el-card shadow="hover">
+        <el-card shadow="hover" class="stat-card">
           <template #header>通过率</template>
-          <div style="font-size: 28px; font-weight: bold; color: #409eff">{{ stats.pass_rate }}%</div>
+          <div class="stat-value" :style="{ color: '#409eff' }">{{ stats.pass_rate }}%</div>
         </el-card>
       </el-col>
     </el-row>
 
-    <el-card style="margin-top: 16px">
+    <el-card class="filter-card">
       <el-form inline>
         <el-form-item label="工单 ID">
           <el-input-number
@@ -163,7 +165,8 @@ onMounted(() => {
       </el-form>
     </el-card>
 
-    <el-table :data="rows" v-loading="loading" style="margin-top: 16px">
+    <div class="data-table">
+      <el-table :data="rows" v-loading="loading" style="margin-top: 16px">
       <el-table-column prop="id" label="ID" width="70" />
       <el-table-column prop="workorder_id" label="工单 ID" width="90" />
       <el-table-column prop="bom_item" label="BOM 物料" min-width="120" show-overflow-tooltip />
@@ -201,8 +204,9 @@ onMounted(() => {
         <template #default="{ row }">{{ formatDateTime(row.checked_at) }}</template>
       </el-table-column>
     </el-table>
+    </div>
 
-    <div style="margin-top: 16px; display: flex; justify-content: flex-end">
+    <div class="pagination-bar">
       <el-pagination
         v-model:current-page="page"
         v-model:page-size="pageSize"

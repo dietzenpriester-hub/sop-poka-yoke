@@ -198,55 +198,56 @@ onUnmounted(() => {
     </el-card>
 
     <!-- 报警列表 -->
-    <el-table
-      :data="alerts"
-      v-loading="loading"
-      style="margin-top: 16px"
-      @selection-change="handleSelectionChange"
-      row-key="id"
-    >
-      <el-table-column type="selection" width="40" />
-      <el-table-column prop="id" label="ID" width="70" />
-      <el-table-column prop="alert_type" label="报警代码" width="100" />
-      <el-table-column prop="severity" label="严重度" width="100">
-        <template #default="{ row }">
-          <el-tag :type="severityTagType(row.severity)" size="small">{{ row.severity }}</el-tag>
-        </template>
-      </el-table-column>
-      <el-table-column prop="message" label="消息" min-width="200" show-overflow-tooltip />
-      <el-table-column prop="step_index" label="步骤" width="70" />
-      <el-table-column prop="station_id" label="工位" width="80" />
-      <el-table-column prop="acknowledged" label="状态" width="90">
-        <template #default="{ row }">
-          <el-tag :type="row.acknowledged === '1' ? 'success' : 'danger'" size="small">
-            {{ row.acknowledged === "1" ? "已确认" : "未确认" }}
-          </el-tag>
-        </template>
-      </el-table-column>
-      <el-table-column prop="created_at" label="时间" width="170">
-        <template #default="{ row }">{{ formatDateTime(row.created_at) }}</template>
-      </el-table-column>
-      <el-table-column label="操作" width="100" fixed="right">
-        <template #default="{ row }">
-          <el-button
-            v-if="row.acknowledged === '0'"
-            type="primary"
-            size="small"
-            @click="handleAcknowledge(row.id)"
-          >
-            确认
-          </el-button>
-          <span v-else style="color: #67c23a; font-size: 12px">已处理</span>
-        </template>
-      </el-table-column>
-    </el-table>
+    <div class="data-table">
+      <el-table
+        :data="alerts"
+        v-loading="loading"
+        @selection-change="handleSelectionChange"
+        row-key="id"
+      >
+        <el-table-column type="selection" width="40" />
+        <el-table-column prop="id" label="ID" width="70" />
+        <el-table-column prop="alert_type" label="报警代码" width="100" />
+        <el-table-column prop="severity" label="严重度" width="100">
+          <template #default="{ row }">
+            <el-tag :type="severityTagType(row.severity)" size="small">{{ row.severity }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="message" label="消息" min-width="200" show-overflow-tooltip />
+        <el-table-column prop="step_index" label="步骤" width="70" />
+        <el-table-column prop="station_id" label="工位" width="80" />
+        <el-table-column prop="acknowledged" label="状态" width="90">
+          <template #default="{ row }">
+            <el-tag :type="row.acknowledged === '1' ? 'success' : 'danger'" size="small">
+              {{ row.acknowledged === "1" ? "已确认" : "未确认" }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="created_at" label="时间" width="170">
+          <template #default="{ row }">{{ formatDateTime(row.created_at) }}</template>
+        </el-table-column>
+        <el-table-column label="操作" width="100" fixed="right">
+          <template #default="{ row }">
+            <el-button
+              v-if="row.acknowledged === '0'"
+              type="primary"
+              size="small"
+              @click="handleAcknowledge(row.id)"
+            >
+              确认
+            </el-button>
+            <el-text v-else type="success" size="small">已处理</el-text>
+          </template>
+        </el-table-column>
+      </el-table>
+    </div>
 
     <!-- 分页 -->
-    <div style="margin-top: 16px; display: flex; justify-content: flex-end">
+    <div class="pagination-bar">
       <el-button :disabled="pagination.skip === 0" @click="pagination.skip = Math.max(0, pagination.skip - pagination.limit); loadAlerts()">
         上一页
       </el-button>
-      <span style="line-height: 32px; margin: 0 12px; color: #666">
+      <span class="page-info">
         第 {{ Math.floor(pagination.skip / pagination.limit) + 1 }} 页
       </span>
       <el-button :disabled="alerts.length < pagination.limit" @click="pagination.skip += pagination.limit; loadAlerts()">

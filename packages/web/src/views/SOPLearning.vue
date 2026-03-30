@@ -270,7 +270,9 @@ function analysisDetailEntries(task: LearningTask): { key: string; value: string
 
 <template>
   <div class="sop-learning-page">
-    <h2 class="page-title">SOP 标准作业学习</h2>
+    <div class="page-header">
+      <h2>SOP 标准作业学习</h2>
+    </div>
     <p class="page-desc">
       三阶段流程：标准作业视频录入 → AI 自动分析与模板生成 → 步骤审核与确认
     </p>

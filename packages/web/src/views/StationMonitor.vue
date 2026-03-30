@@ -98,21 +98,22 @@ onMounted(() => loadStations());
 
 <template>
   <div>
-    <div style="display: flex; justify-content: space-between; align-items: center">
+    <div class="page-header">
       <h2>工位管理</h2>
-      <div>
+      <div class="page-header-actions">
         <el-input
           v-model="lineFilter"
           placeholder="产线筛选"
           clearable
-          style="width: 140px; margin-right: 8px"
+          style="width: 140px"
           @change="loadStations"
         />
         <el-button type="primary" @click="showCreateDialog = true">新增工位</el-button>
       </div>
     </div>
 
-    <el-table :data="stations" v-loading="loading" style="margin-top: 16px">
+    <div class="data-table">
+      <el-table :data="stations" v-loading="loading">
       <el-table-column prop="id" label="ID" width="70" />
       <el-table-column prop="name" label="工位名称" width="120" />
       <el-table-column prop="line_id" label="产线" width="100" />
@@ -130,6 +131,7 @@ onMounted(() => loadStations());
         </template>
       </el-table-column>
     </el-table>
+    </div>
 
     <!-- 创建对话框 -->
     <el-dialog v-model="showCreateDialog" title="新增工位" width="520px">

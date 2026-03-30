@@ -110,34 +110,36 @@ onMounted(() => loadAll());
 
 <template>
   <div v-loading="loading">
-    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px">
-      <h2 style="margin: 0">数据生命周期</h2>
-      <el-button type="primary" :icon="Refresh" @click="loadAll">刷新</el-button>
+    <div class="page-header">
+      <h2>数据生命周期</h2>
+      <div class="page-header-actions">
+        <el-button type="primary" :icon="Refresh" @click="loadAll">刷新</el-button>
+      </div>
     </div>
 
     <el-row :gutter="16" style="margin-bottom: 16px">
       <el-col :xs="24" :sm="12" :md="8" :lg="4" style="margin-bottom: 12px">
-        <el-card shadow="hover">
+        <el-card shadow="hover" class="stat-card">
           <el-statistic title="步骤记录" :value="stats?.total_step_records ?? 0" />
         </el-card>
       </el-col>
       <el-col :xs="24" :sm="12" :md="8" :lg="4" style="margin-bottom: 12px">
-        <el-card shadow="hover">
+        <el-card shadow="hover" class="stat-card">
           <el-statistic title="报警事件" :value="stats?.total_alerts ?? 0" />
         </el-card>
       </el-col>
       <el-col :xs="24" :sm="12" :md="8" :lg="4" style="margin-bottom: 12px">
-        <el-card shadow="hover">
+        <el-card shadow="hover" class="stat-card">
           <el-statistic title="物料校验" :value="stats?.total_material_checks ?? 0" />
         </el-card>
       </el-col>
       <el-col :xs="24" :sm="12" :md="8" :lg="4" style="margin-bottom: 12px">
-        <el-card shadow="hover">
+        <el-card shadow="hover" class="stat-card">
           <el-statistic title="完工检验" :value="stats?.total_completion_checks ?? 0" />
         </el-card>
       </el-col>
       <el-col :xs="24" :sm="12" :md="8" :lg="4" style="margin-bottom: 12px">
-        <el-card shadow="hover">
+        <el-card shadow="hover" class="stat-card">
           <el-statistic title="放行审计" :value="stats?.total_override_logs ?? 0" />
         </el-card>
       </el-col>
@@ -145,7 +147,7 @@ onMounted(() => loadAll());
 
     <el-row :gutter="16">
       <el-col :xs="24" :lg="12" style="margin-bottom: 16px">
-        <el-card shadow="never">
+        <el-card shadow="never" class="section-card">
           <template #header>保留策略</template>
           <el-table :data="policies" stripe size="small" max-height="360">
             <el-table-column prop="type_name" label="类型" width="140" />
@@ -155,7 +157,7 @@ onMounted(() => loadAll());
         </el-card>
       </el-col>
       <el-col :xs="24" :lg="12" style="margin-bottom: 16px">
-        <el-card shadow="never">
+        <el-card shadow="never" class="section-card">
           <template #header>已过期待清理（估算）</template>
           <el-descriptions :column="1" border size="small">
             <el-descriptions-item v-for="row in expiredRows" :key="row.key" :label="row.label">
@@ -178,7 +180,7 @@ onMounted(() => loadAll());
       </el-space>
     </el-card>
 
-    <el-card shadow="never">
+    <el-card shadow="never" class="section-card">
       <template #header>清理历史</template>
       <el-table :data="history" stripe size="small" max-height="420">
         <el-table-column prop="id" label="ID" width="70" />

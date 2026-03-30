@@ -99,36 +99,38 @@ onMounted(() => {
 
 <template>
   <div>
-    <h2>完工检验记录</h2>
+    <div class="page-header">
+      <h2>完工检验记录</h2>
+    </div>
 
     <el-row :gutter="16" style="margin-top: 16px">
       <el-col :xs="12" :sm="6">
-        <el-card shadow="hover">
+        <el-card shadow="hover" class="stat-card">
           <template #header>检验总数</template>
-          <div style="font-size: 28px; font-weight: bold; color: #409eff">{{ stats.total }}</div>
+          <div class="stat-value" :style="{ color: '#409eff' }">{{ stats.total }}</div>
         </el-card>
       </el-col>
       <el-col :xs="12" :sm="6">
-        <el-card shadow="hover">
+        <el-card shadow="hover" class="stat-card">
           <template #header>PASS</template>
-          <div style="font-size: 28px; font-weight: bold; color: #67c23a">{{ stats.pass_count }}</div>
+          <div class="stat-value" :style="{ color: '#67c23a' }">{{ stats.pass_count }}</div>
         </el-card>
       </el-col>
       <el-col :xs="12" :sm="6">
-        <el-card shadow="hover">
+        <el-card shadow="hover" class="stat-card">
           <template #header>FAIL</template>
-          <div style="font-size: 28px; font-weight: bold; color: #f56c6c">{{ stats.fail_count }}</div>
+          <div class="stat-value" :style="{ color: '#f56c6c' }">{{ stats.fail_count }}</div>
         </el-card>
       </el-col>
       <el-col :xs="12" :sm="6">
-        <el-card shadow="hover">
+        <el-card shadow="hover" class="stat-card">
           <template #header>通过率</template>
-          <div style="font-size: 28px; font-weight: bold; color: #e6a23c">{{ stats.pass_rate }}%</div>
+          <div class="stat-value" :style="{ color: '#e6a23c' }">{{ stats.pass_rate }}%</div>
         </el-card>
       </el-col>
     </el-row>
 
-    <el-card style="margin-top: 16px">
+    <el-card class="filter-card">
       <el-form inline>
         <el-form-item label="工单 ID">
           <el-input-number v-model="filters.workorder_id" :min="1" controls-position="right" clearable placeholder="工单ID" style="width: 140px" />
@@ -147,7 +149,8 @@ onMounted(() => {
       </el-form>
     </el-card>
 
-    <el-table :data="rows" v-loading="loading" style="margin-top: 16px">
+    <div class="data-table">
+      <el-table :data="rows" v-loading="loading" style="margin-top: 16px">
       <el-table-column prop="id" label="ID" width="70" />
       <el-table-column prop="workorder_id" label="工单 ID" width="90" />
       <el-table-column prop="result" label="结果" width="100">
@@ -180,8 +183,9 @@ onMounted(() => {
         </template>
       </el-table-column>
     </el-table>
+    </div>
 
-    <div style="margin-top: 16px; display: flex; justify-content: flex-end">
+    <div class="pagination-bar">
       <el-pagination
         v-model:current-page="page"
         v-model:page-size="pageSize"

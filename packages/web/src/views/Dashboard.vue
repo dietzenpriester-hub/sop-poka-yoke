@@ -25,17 +25,11 @@ const stationStatus = ref<StationStatusItem[]>([]);
 const recentAlerts = ref<RecentAlert[]>([]);
 const loading = ref(false);
 
-/**
- * 仪表盘 WebSocket：当前仅用于展示「实时连接」在线/离线状态（与工位 live 通道的连通性）。
- * 业务数据由轮询 loadDashboard 拉取；若将来需在此页消费实时推送，可在此 onMessage 中扩展。
- */
 const wsStationId = ref("");
 
 const { chartRef: trendChartRef, setOption: setTrendOption, resize: resizeTrend } = useECharts();
 
-const { ready: wsReady } = useStationWebSocket(wsStationId, () => {
-  /* 占位：未消费消息；仅保留连接以驱动上方连接状态指示 */
-});
+const { ready: wsReady } = useStationWebSocket(wsStationId, () => {});
 
 let refreshTimer: ReturnType<typeof setInterval> | null = null;
 let requestSeq = 0;
@@ -51,20 +45,19 @@ function formatAlertTime(iso: string): string {
 
 function applyTrendChart(trend: HourlyTrend) {
   setTrendOption({
-    title: { text: "今日逐小时 OK / NG 趋势", left: "center" },
     tooltip: { trigger: "axis" },
-    legend: { data: ["OK", "NG"], bottom: 0 },
-    grid: { left: 50, right: 24, bottom: 48, top: 48 },
-    xAxis: { type: "category", boundaryGap: false, data: trend.hours },
-    yAxis: { type: "value", name: "次数" },
+    legend: { data: ["OK", "NG"], top: 12, right: 20, textStyle: { fontSize: 12 } },
+    grid: { left: 48, right: 20, bottom: 32, top: 48 },
+    xAxis: { type: "category", boundaryGap: false, data: trend.hours, axisLine: { lineStyle: { color: "#e5e6eb" } }, axisLabel: { color: "#86909c", fontSize: 11 } },
+    yAxis: { type: "value", name: "次数", nameTextStyle: { color: "#86909c" }, splitLine: { lineStyle: { type: "dashed", color: "#f0f0f0" } }, axisLabel: { color: "#86909c" } },
     series: [
       {
         name: "OK",
         type: "line",
         smooth: true,
         showSymbol: false,
-        areaStyle: { opacity: 0.25 },
-        lineStyle: { width: 2 },
+        areaStyle: { color: { type: "linear", x: 0, y: 0, x2: 0, y2: 1, colorStops: [{ offset: 0, color: "rgba(103,194,58,0.25)" }, { offset: 1, color: "rgba(103,194,58,0.02)" }] } },
+        lineStyle: { width: 2.5 },
         color: "#67c23a",
         data: trend.ok,
       },
@@ -73,8 +66,8 @@ function applyTrendChart(trend: HourlyTrend) {
         type: "line",
         smooth: true,
         showSymbol: false,
-        areaStyle: { opacity: 0.25 },
-        lineStyle: { width: 2 },
+        areaStyle: { color: { type: "linear", x: 0, y: 0, x2: 0, y2: 1, colorStops: [{ offset: 0, color: "rgba(245,108,108,0.25)" }, { offset: 1, color: "rgba(245,108,108,0.02)" }] } },
+        lineStyle: { width: 2.5 },
         color: "#f56c6c",
         data: trend.ng,
       },
@@ -97,26 +90,18 @@ async function loadDashboard() {
 
     const [ovRes, stRes, alRes, trRes] = results;
 
-    if (ovRes.status === "fulfilled") {
-      overview.value = ovRes.value.data;
-    }
+    if (ovRes.status === "fulfilled") overview.value = ovRes.value.data;
     if (stRes.status === "fulfilled") {
       stationStatus.value = stRes.value.data;
       if (!wsStationId.value && stRes.value.data.length > 0) {
         wsStationId.value = String(stRes.value.data[0].id);
       }
     }
-    if (alRes.status === "fulfilled") {
-      recentAlerts.value = alRes.value.data;
-    }
-    if (trRes.status === "fulfilled") {
-      applyTrendChart(trRes.value.data);
-    }
+    if (alRes.status === "fulfilled") recentAlerts.value = alRes.value.data;
+    if (trRes.status === "fulfilled") applyTrendChart(trRes.value.data);
 
     const failed = results.filter((r) => r.status === "rejected").length;
-    if (failed > 0) {
-      ElMessage.warning(`部分仪表盘数据加载失败（${failed}/4）`);
-    }
+    if (failed > 0) ElMessage.warning(`部分仪表盘数据加载失败（${failed}/4）`);
   } finally {
     if (seq === requestSeq) loading.value = false;
   }
@@ -133,109 +118,77 @@ onUnmounted(() => {
     refreshTimer = null;
   }
 });
+
+interface StatItem {
+  icon: typeof Odometer;
+  label: string;
+  key: keyof DashboardOverview;
+  color: string;
+  bg: string;
+  suffix?: string;
+}
+
+const statItems: StatItem[] = [
+  { icon: Odometer, label: "活跃工单", key: "active_orders", color: "#409eff", bg: "rgba(64,158,255,0.08)" },
+  { icon: SuccessFilled, label: "今日 OK", key: "today_ok", color: "#67c23a", bg: "rgba(103,194,58,0.08)" },
+  { icon: CircleClose, label: "今日 NG", key: "today_ng", color: "#f56c6c", bg: "rgba(245,108,108,0.08)" },
+  { icon: TrendCharts, label: "合格率", key: "ok_rate", color: "#e6a23c", bg: "rgba(230,162,60,0.08)", suffix: "%" },
+  { icon: WarningFilled, label: "未确认报警", key: "unacknowledged_alerts", color: "#f56c6c", bg: "rgba(245,108,108,0.08)" },
+  { icon: Bell, label: "今日报警", key: "today_alerts", color: "#e6a23c", bg: "rgba(230,162,60,0.08)" },
+];
 </script>
 
 <template>
   <div v-loading="loading">
-    <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px">
-      <h2 style="margin: 0">实时监控仪表盘</h2>
-      <el-text type="info" size="small">每 15 秒自动刷新</el-text>
+    <div class="page-header">
+      <h2>实时监控仪表盘</h2>
+      <div class="page-header-actions">
+        <el-tag
+          :type="wsReady ? 'success' : 'danger'"
+          effect="dark"
+          round
+          size="small"
+        >
+          <span class="ws-dot" :class="{ online: wsReady }" />
+          {{ wsReady ? "在线" : "离线" }}
+        </el-tag>
+        <el-text type="info" size="small">每 15 秒自动刷新</el-text>
+      </div>
     </div>
 
-    <!-- 6 张概览卡片 -->
-    <el-row :gutter="16" style="margin-top: 16px">
-      <el-col :xs="24" :sm="12" :md="8" :lg="4">
-        <el-card shadow="hover">
-          <template #header>
-            <span style="display: inline-flex; align-items: center; gap: 6px">
-              <el-icon><Odometer /></el-icon>
-              活跃工单
-            </span>
-          </template>
-          <div style="font-size: 28px; font-weight: bold; color: #409eff">
-            {{ overview?.active_orders ?? "—" }}
+    <el-row :gutter="16">
+      <el-col v-for="s in statItems" :key="s.key" :xs="12" :sm="8" :md="4">
+        <div class="dash-stat-card" :style="{ '--card-accent': s.color, '--card-bg': s.bg }">
+          <div class="dash-stat-icon">
+            <el-icon :size="22" :color="s.color"><component :is="s.icon" /></el-icon>
           </div>
-        </el-card>
-      </el-col>
-      <el-col :xs="24" :sm="12" :md="8" :lg="4">
-        <el-card shadow="hover">
-          <template #header>
-            <span style="display: inline-flex; align-items: center; gap: 6px">
-              <el-icon><SuccessFilled /></el-icon>
-              今日 OK
+          <div class="dash-stat-info">
+            <span class="dash-stat-label">{{ s.label }}</span>
+            <span class="dash-stat-value" :style="{ color: s.color }">
+              {{ overview != null ? (overview[s.key] ?? "—") : "—" }}{{ s.suffix || "" }}
             </span>
-          </template>
-          <div style="font-size: 28px; font-weight: bold; color: #67c23a">
-            {{ overview?.today_ok ?? "—" }}
           </div>
-        </el-card>
-      </el-col>
-      <el-col :xs="24" :sm="12" :md="8" :lg="4">
-        <el-card shadow="hover">
-          <template #header>
-            <span style="display: inline-flex; align-items: center; gap: 6px">
-              <el-icon><CircleClose /></el-icon>
-              今日 NG
-            </span>
-          </template>
-          <div style="font-size: 28px; font-weight: bold; color: #f56c6c">
-            {{ overview?.today_ng ?? "—" }}
-          </div>
-        </el-card>
-      </el-col>
-      <el-col :xs="24" :sm="12" :md="8" :lg="4">
-        <el-card shadow="hover">
-          <template #header>
-            <span style="display: inline-flex; align-items: center; gap: 6px">
-              <el-icon><TrendCharts /></el-icon>
-              合格率
-            </span>
-          </template>
-          <div style="font-size: 28px; font-weight: bold; color: #e6a23c">
-            {{ overview != null ? `${overview.ok_rate}%` : "—" }}
-          </div>
-        </el-card>
-      </el-col>
-      <el-col :xs="24" :sm="12" :md="8" :lg="4">
-        <el-card shadow="hover">
-          <template #header>
-            <span style="display: inline-flex; align-items: center; gap: 6px">
-              <el-icon><WarningFilled /></el-icon>
-              未确认报警
-            </span>
-          </template>
-          <div style="font-size: 28px; font-weight: bold; color: #f56c6c">
-            {{ overview?.unacknowledged_alerts ?? "—" }}
-          </div>
-        </el-card>
-      </el-col>
-      <el-col :xs="24" :sm="12" :md="8" :lg="4">
-        <el-card shadow="hover">
-          <template #header>
-            <span style="display: inline-flex; align-items: center; gap: 6px">
-              <el-icon><Bell /></el-icon>
-              今日报警
-            </span>
-          </template>
-          <div style="font-size: 28px; font-weight: bold; color: #e6a23c">
-            {{ overview?.today_alerts ?? "—" }}
-          </div>
-        </el-card>
+        </div>
       </el-col>
     </el-row>
 
-    <!-- 趋势图 + 最近报警 -->
     <el-row :gutter="16" style="margin-top: 16px">
       <el-col :xs="24" :lg="16">
-        <el-card shadow="never">
-          <div ref="trendChartRef" style="width: 100%; height: 360px" />
+        <el-card class="section-card">
+          <template #header>
+            <span style="font-weight: 600; font-size: 14px">今日 OK / NG 趋势</span>
+          </template>
+          <div ref="trendChartRef" style="width: 100%; height: 340px" />
         </el-card>
       </el-col>
       <el-col :xs="24" :lg="8">
-        <el-card shadow="never">
-          <template #header>最近报警（10 条）</template>
-          <el-scrollbar max-height="360px">
-            <el-empty v-if="recentAlerts.length === 0" description="暂无报警" />
+        <el-card class="section-card">
+          <template #header>
+            <span style="font-weight: 600; font-size: 14px">最近报警</span>
+            <el-tag size="small" type="info" style="margin-left: 8px">10 条</el-tag>
+          </template>
+          <el-scrollbar max-height="340px">
+            <el-empty v-if="recentAlerts.length === 0" description="暂无报警" :image-size="80" />
             <el-timeline v-else>
               <el-timeline-item
                 v-for="a in recentAlerts"
@@ -267,41 +220,140 @@ onUnmounted(() => {
       </el-col>
     </el-row>
 
-    <!-- WebSocket：仅用于展示与工位 live 通道的连接状态（见 script 顶部注释） -->
-    <el-card style="margin-top: 16px">
-      <template #header>
-        <span>实时连接</span>
-        <el-tag :type="wsReady ? 'success' : 'danger'" style="margin-left: 12px">
-          {{ wsReady ? "在线" : "离线" }}
-        </el-tag>
-      </template>
-      <p style="margin: 0 0 8px">
-        WebSocket：{{ wsReady ? "已连接" : "未连接" }}
-        <span v-if="wsStationId">（工位 ID：{{ wsStationId }}）</span>
-        <span v-else>（暂无工位，请先配置工位）</span>
-      </p>
-    </el-card>
-
-    <!-- 工位状态 -->
-    <h3 style="margin: 24px 0 12px">工位状态</h3>
-    <el-row :gutter="16">
-      <el-col v-for="s in stationStatus" :key="s.id" :xs="24" :sm="12" :md="8" :lg="6">
-        <el-card shadow="hover" style="margin-bottom: 16px">
-          <div style="display: flex; justify-content: space-between; align-items: flex-start">
-            <div>
-              <div style="font-size: 16px; font-weight: 600">{{ s.name }}</div>
-              <el-text size="small" type="info">产线：{{ s.line_id || "—" }}</el-text>
+    <div style="margin-top: 20px">
+      <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 12px">
+        <h3 style="margin: 0; font-size: 15px; font-weight: 600">工位状态</h3>
+        <el-tag size="small" type="info">{{ stationStatus.length }} 个</el-tag>
+      </div>
+      <el-row :gutter="16">
+        <el-col v-for="s in stationStatus" :key="s.id" :xs="24" :sm="12" :md="8" :lg="6">
+          <div class="station-card">
+            <div class="station-card-top">
+              <div>
+                <div class="station-name">{{ s.name }}</div>
+                <div class="station-line">产线：{{ s.line_id || "—" }}</div>
+              </div>
+              <el-tag :type="s.status === 'busy' ? 'warning' : 'success'" size="small" effect="dark" round>
+                {{ s.status === "busy" ? "忙碌" : "空闲" }}
+              </el-tag>
             </div>
-            <el-tag :type="s.status === 'busy' ? 'warning' : 'success'" size="small">
-              {{ s.status === "busy" ? "忙碌" : "空闲" }}
-            </el-tag>
+            <div class="station-card-bottom">
+              活跃工单：<strong>{{ s.active_orders }}</strong>
+            </div>
           </div>
-          <div style="margin-top: 12px; font-size: 14px">
-            活跃工单：<strong>{{ s.active_orders }}</strong>
-          </div>
-        </el-card>
-      </el-col>
-    </el-row>
-    <el-empty v-if="!loading && stationStatus.length === 0" description="暂无工位数据" />
+        </el-col>
+      </el-row>
+      <el-empty v-if="!loading && stationStatus.length === 0" description="暂无工位数据" :image-size="80" />
+    </div>
   </div>
 </template>
+
+<style scoped>
+.dash-stat-card {
+  background: var(--card-bg);
+  border-radius: var(--sop-radius-lg);
+  padding: 18px 16px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 16px;
+  transition: transform var(--sop-transition), box-shadow var(--sop-transition);
+  cursor: default;
+}
+
+.dash-stat-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.06);
+}
+
+.dash-stat-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.8);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.dash-stat-info {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.dash-stat-label {
+  font-size: 12px;
+  color: #86909c;
+  white-space: nowrap;
+}
+
+.dash-stat-value {
+  font-size: 26px;
+  font-weight: 700;
+  letter-spacing: -0.5px;
+  line-height: 1.1;
+}
+
+.ws-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #f56c6c;
+  margin-right: 4px;
+  vertical-align: middle;
+}
+
+.ws-dot.online {
+  background: #67c23a;
+  animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+.station-card {
+  background: #fff;
+  border-radius: var(--sop-radius-lg);
+  padding: 16px;
+  margin-bottom: 16px;
+  box-shadow: var(--sop-shadow-sm);
+  transition: transform var(--sop-transition), box-shadow var(--sop-transition);
+}
+
+.station-card:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--sop-shadow-md);
+}
+
+.station-card-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+}
+
+.station-name {
+  font-size: 15px;
+  font-weight: 600;
+  color: #1d2129;
+}
+
+.station-line {
+  font-size: 12px;
+  color: #86909c;
+  margin-top: 2px;
+}
+
+.station-card-bottom {
+  margin-top: 12px;
+  font-size: 14px;
+  color: #4e5969;
+  padding-top: 10px;
+  border-top: 1px solid #f2f3f5;
+}
+</style>

@@ -194,12 +194,14 @@ onMounted(() => {
 
 <template>
   <div>
-    <div style="display: flex; justify-content: space-between; align-items: center">
+    <div class="page-header">
       <h2>工单管理</h2>
-      <el-button type="primary" @click="showCreateDialog = true">新建工单</el-button>
+      <div class="page-header-actions">
+        <el-button type="primary" @click="showCreateDialog = true">新建工单</el-button>
+      </div>
     </div>
 
-    <el-card style="margin-top: 16px">
+    <el-card class="filter-card">
       <el-form inline>
         <el-form-item label="SN">
           <el-input v-model="filters.sn" placeholder="模糊搜索" clearable style="width: 180px" />
@@ -229,35 +231,37 @@ onMounted(() => {
       </el-form>
     </el-card>
 
-    <el-table :data="workorders" v-loading="loading" style="margin-top: 16px">
-      <el-table-column prop="id" label="ID" width="70" />
-      <el-table-column prop="sn" label="SN" min-width="120" show-overflow-tooltip />
-      <el-table-column prop="station_id" label="工位 ID" width="90" />
-      <el-table-column prop="status" label="状态" width="100">
-        <template #default="{ row }">
-          <el-tag :type="statusTagType(row.status)" size="small">{{ row.status }}</el-tag>
-        </template>
-      </el-table-column>
-      <el-table-column prop="start_time" label="开始时间" width="170">
-        <template #default="{ row }">{{ formatDateTime(row.start_time) }}</template>
-      </el-table-column>
-      <el-table-column prop="end_time" label="结束时间" width="170">
-        <template #default="{ row }">{{ formatDateTime(row.end_time) }}</template>
-      </el-table-column>
-      <el-table-column label="操作" width="220" fixed="right">
-        <template #default="{ row }">
-          <el-button size="small" @click="openDetail(row)">详情</el-button>
-          <el-button v-if="row.status === 'running'" size="small" type="success" @click="handleComplete(row)">
-            完成
-          </el-button>
-          <el-button size="small" type="danger" @click="handleDelete(row)">删除</el-button>
-        </template>
-      </el-table-column>
-    </el-table>
+    <div class="data-table">
+      <el-table :data="workorders" v-loading="loading">
+        <el-table-column prop="id" label="ID" width="70" />
+        <el-table-column prop="sn" label="SN" min-width="120" show-overflow-tooltip />
+        <el-table-column prop="station_id" label="工位 ID" width="90" />
+        <el-table-column prop="status" label="状态" width="100">
+          <template #default="{ row }">
+            <el-tag :type="statusTagType(row.status)" size="small">{{ row.status }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="start_time" label="开始时间" width="170">
+          <template #default="{ row }">{{ formatDateTime(row.start_time) }}</template>
+        </el-table-column>
+        <el-table-column prop="end_time" label="结束时间" width="170">
+          <template #default="{ row }">{{ formatDateTime(row.end_time) }}</template>
+        </el-table-column>
+        <el-table-column label="操作" width="220" fixed="right">
+          <template #default="{ row }">
+            <el-button size="small" @click="openDetail(row)">详情</el-button>
+            <el-button v-if="row.status === 'running'" size="small" type="success" @click="handleComplete(row)">
+              完成
+            </el-button>
+            <el-button size="small" type="danger" @click="handleDelete(row)">删除</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+    </div>
 
-    <div style="margin-top: 16px; display: flex; justify-content: flex-end; align-items: center">
+    <div class="pagination-bar">
       <el-button :disabled="pagination.skip === 0" @click="prevPage">上一页</el-button>
-      <span style="line-height: 32px; margin: 0 12px; color: #666">第 {{ currentPage }} 页</span>
+      <span class="page-info">第 {{ currentPage }} 页</span>
       <el-button :disabled="workorders.length < pagination.limit" @click="nextPage">下一页</el-button>
     </div>
 
