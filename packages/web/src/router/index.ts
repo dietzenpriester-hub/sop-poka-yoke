@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory } from "vue-router";
 import { parseJwtPayload, isTokenExpired } from "@/utils/jwt";
+import { STORAGE_TOKEN_KEY } from "@/utils/constants";
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -22,12 +23,12 @@ const router = createRouter({
 });
 
 router.beforeEach((to) => {
-  const token = sessionStorage.getItem("sop_token");
+  const token = sessionStorage.getItem(STORAGE_TOKEN_KEY);
   if (to.name === "login" && token && !isTokenExpired(token)) {
     return { name: "dashboard" };
   }
   if (!to.meta?.public && (!token || isTokenExpired(token))) {
-    sessionStorage.removeItem("sop_token");
+    sessionStorage.removeItem(STORAGE_TOKEN_KEY);
     return { name: "login" };
   }
   if (to.meta?.requiresAdmin && token) {

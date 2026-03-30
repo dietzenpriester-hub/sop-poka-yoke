@@ -1,4 +1,5 @@
 import { onUnmounted, ref, watch, isRef, type Ref } from "vue";
+import { STORAGE_TOKEN_KEY } from "@/utils/constants";
 
 export type WsMessageHandler = (data: unknown) => void;
 
@@ -41,7 +42,7 @@ export function useStationWebSocket(
       ready.value = false;
       return;
     }
-    const token = sessionStorage.getItem("sop_token");
+    const token = sessionStorage.getItem(STORAGE_TOKEN_KEY);
     ws = new WebSocket(`${apiBaseWs}/api/ws/live/${encodeURIComponent(id)}`);
     ws.onopen = () => {
       retryCount = 0;

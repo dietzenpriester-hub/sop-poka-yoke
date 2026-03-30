@@ -3,6 +3,7 @@ import { ref, onMounted } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { userApi, type UserItem } from "@/api/user";
 import { parseErrorMsg } from "@/utils/httpError";
+import { formatDateTime } from "@/utils/date";
 
 const users = ref<UserItem[]>([]);
 const loading = ref(false);
@@ -104,10 +105,6 @@ function roleTagType(role: string): "" | "success" | "warning" | "danger" | "inf
   }
 }
 
-function formatTime(ts: string): string {
-  return new Date(ts).toLocaleString("zh-CN");
-}
-
 onMounted(() => loadUsers());
 </script>
 
@@ -136,7 +133,7 @@ onMounted(() => loadUsers());
       </el-table-column>
       <el-table-column prop="badge_id" label="工牌号" width="100" />
       <el-table-column prop="created_at" label="创建时间" width="170">
-        <template #default="{ row }">{{ formatTime(row.created_at) }}</template>
+        <template #default="{ row }">{{ formatDateTime(row.created_at) }}</template>
       </el-table-column>
       <el-table-column label="操作" width="220" fixed="right">
         <template #default="{ row }">

@@ -26,7 +26,7 @@ router = APIRouter()
 
 @router.get("/policies", response_model=RetentionPoliciesResponse)
 async def get_retention_policies(_: dict = Depends(require_admin)):
-    """Get current retention policies."""
+    """获取当前数据保留策略。"""
     descriptions = {
         "step_ok": "OK 步骤截图",
         "step_ng": "NG 异常视频片段",
@@ -48,7 +48,7 @@ async def get_storage_stats(
     db: AsyncSession = Depends(get_db),
     _: dict = Depends(require_admin),
 ):
-    """Get storage overview and expired record counts."""
+    """获取存储概览与超期记录数量。"""
     total_steps = (await db.execute(select(func.count(StepRecord.id)))).scalar_one()
     total_alerts = (await db.execute(select(func.count(AlertEvent.id)))).scalar_one()
     total_mc = (await db.execute(select(func.count(MaterialCheck.id)))).scalar_one()
@@ -73,7 +73,7 @@ async def trigger_cleanup(
     db: AsyncSession = Depends(get_db),
     _: dict = Depends(require_admin),
 ):
-    """Manually trigger a cleanup run. dry_run=true for preview only."""
+    """手动触发清理任务；dry_run=true 时仅预览不实际删除。"""
     result = await run_cleanup(db, dry_run=dry_run)
     return CleanupRunResponse(
         log_id=result["log_id"],
@@ -94,7 +94,7 @@ async def get_cleanup_history(
     db: AsyncSession = Depends(get_db),
     _: dict = Depends(require_admin),
 ):
-    """Get cleanup execution history."""
+    """获取清理执行历史。"""
     result = await db.execute(
         select(CleanupLog).order_by(CleanupLog.id.desc()).offset(skip).limit(limit)
     )

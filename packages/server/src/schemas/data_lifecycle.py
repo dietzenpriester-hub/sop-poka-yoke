@@ -1,7 +1,6 @@
 """数据生命周期 API 模型"""
 
 from datetime import datetime
-from typing import Optional
 
 from pydantic import BaseModel, Field
 
@@ -25,7 +24,7 @@ class CleanupLogResponse(BaseModel):
     status: str
     error_message: str = ""
     started_at: datetime
-    completed_at: Optional[datetime] = None
+    completed_at: datetime | None = None
 
     model_config = {"from_attributes": True}
 

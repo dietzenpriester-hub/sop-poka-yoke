@@ -9,10 +9,14 @@ class KeyframeExtractor:
     def __init__(self, diff_threshold: float = 30.0, min_area_ratio: float = 0.01) -> None:
         self.diff_threshold = diff_threshold
         self.min_area_ratio = min_area_ratio
-        self.bg_subtractor = cv2.createBackgroundSubtractorMOG2(
+        self.bg_subtractor = self._make_bg_subtractor()
+        self._prev_gray: np.ndarray | None = None
+
+    @staticmethod
+    def _make_bg_subtractor():
+        return cv2.createBackgroundSubtractorMOG2(
             history=500, varThreshold=50, detectShadows=False
         )
-        self._prev_gray: np.ndarray | None = None
 
     def is_keyframe(self, frame: np.ndarray) -> bool:
         if frame.ndim == 2 or (frame.ndim == 3 and frame.shape[2] == 1):
@@ -39,6 +43,4 @@ class KeyframeExtractor:
 
     def reset(self) -> None:
         self._prev_gray = None
-        self.bg_subtractor = cv2.createBackgroundSubtractorMOG2(
-            history=500, varThreshold=50, detectShadows=False
-        )
+        self.bg_subtractor = self._make_bg_subtractor()

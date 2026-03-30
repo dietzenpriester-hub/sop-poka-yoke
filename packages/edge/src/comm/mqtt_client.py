@@ -10,6 +10,7 @@ import paho.mqtt.client as mqtt
 from loguru import logger
 
 MAX_PAYLOAD_BYTES = 1024 * 1024  # 1 MB
+MQTT_KEEPALIVE_SEC = 60
 
 
 class MQTTClient:
@@ -30,7 +31,7 @@ class MQTTClient:
         use_tls = os.environ.get("SOP_MQTT_TLS", "0") == "1"
         if use_tls:
             self._client.tls_set()
-        self._client.connect(self.broker, self.port, 60)
+        self._client.connect(self.broker, self.port, MQTT_KEEPALIVE_SEC)
         self._client.loop_start()
         logger.info("MQTT 已连接: {}:{} (TLS={})", self.broker, self.port, use_tls)
 

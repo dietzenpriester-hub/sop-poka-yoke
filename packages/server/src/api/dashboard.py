@@ -14,6 +14,8 @@ from src.models.workorder import StepRecord, WorkOrder
 
 router = APIRouter()
 
+RECENT_ALERTS_LIMIT = 10
+
 
 @router.get("/overview")
 async def overview(
@@ -108,7 +110,7 @@ async def recent_alerts(
     _: dict = Depends(get_current_user),
 ):
     """最近 10 条报警。"""
-    q = select(AlertEvent).order_by(AlertEvent.id.desc()).limit(10)
+    q = select(AlertEvent).order_by(AlertEvent.id.desc()).limit(RECENT_ALERTS_LIMIT)
     result = await db.execute(q)
     alerts = result.scalars().all()
     return [

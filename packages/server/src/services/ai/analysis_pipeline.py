@@ -198,7 +198,7 @@ class AnalysisPipeline:
             object_name = minio_path
 
         logger.info("下载视频: {}/{} → {}", bucket, object_name, local_path)
-        await asyncio.get_event_loop().run_in_executor(
+        await asyncio.get_running_loop().run_in_executor(
             None, client.fget_object, bucket, object_name, local_path,
         )
 

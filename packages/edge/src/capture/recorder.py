@@ -11,6 +11,8 @@ from pathlib import Path
 import cv2
 from loguru import logger
 
+DEFAULT_JPEG_QUALITY = 85
+
 
 class VideoRecorder:
 
@@ -70,7 +72,7 @@ class VideoRecorder:
         filename = f"{work_order_sn}_step{step_index}_{time.strftime('%Y%m%d_%H%M%S')}.jpg"
         filepath = self.output_dir / "snapshots" / filename
         filepath.parent.mkdir(parents=True, exist_ok=True)
-        cv2.imwrite(str(filepath), frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
+        cv2.imwrite(str(filepath), frame, [cv2.IMWRITE_JPEG_QUALITY, DEFAULT_JPEG_QUALITY])
         return str(filepath)
 
     def _get_clip_path(self) -> str:

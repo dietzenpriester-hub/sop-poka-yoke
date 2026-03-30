@@ -55,7 +55,7 @@ async def list_alerts(
 async def unacknowledged_count(
     station_id: int | None = None,
     db: AsyncSession = Depends(get_db),
-    user: dict = Depends(get_current_user),
+    _: dict = Depends(get_current_user),
 ):
     """获取未确认报警数量。"""
     q = select(func.count(AlertEvent.id)).where(AlertEvent.acknowledged == "0")
@@ -69,7 +69,7 @@ async def unacknowledged_count(
 async def alert_stats(
     station_id: int | None = None,
     db: AsyncSession = Depends(get_db),
-    user: dict = Depends(get_current_user),
+    _: dict = Depends(get_current_user),
 ):
     """报警统计：按严重度分组计数。"""
     q = select(AlertEvent.severity, func.count(AlertEvent.id).label("count"))
@@ -94,7 +94,7 @@ async def alert_stats(
 async def create_alert(
     data: AlertCreate,
     db: AsyncSession = Depends(get_db),
-    user: dict = Depends(get_current_user),
+    _: dict = Depends(get_current_user),
 ):
     """手动创建报警（通常由边缘端通过 MQTT 自动创建）。"""
     alert = AlertEvent(**data.model_dump())
@@ -108,7 +108,7 @@ async def create_alert(
 async def get_alert(
     alert_id: int,
     db: AsyncSession = Depends(get_db),
-    user: dict = Depends(get_current_user),
+    _: dict = Depends(get_current_user),
 ):
     """获取单条报警详情。"""
     result = await db.execute(select(AlertEvent).where(AlertEvent.id == alert_id))
@@ -122,7 +122,7 @@ async def get_alert(
 async def acknowledge_alert(
     alert_id: int,
     db: AsyncSession = Depends(get_db),
-    user: dict = Depends(get_current_user),
+    _: dict = Depends(get_current_user),
 ):
     """确认（处理）报警。"""
     result = await db.execute(select(AlertEvent).where(AlertEvent.id == alert_id))
@@ -140,7 +140,7 @@ async def acknowledge_alert(
 async def batch_acknowledge(
     body: AlertBatchAck,
     db: AsyncSession = Depends(get_db),
-    user: dict = Depends(get_current_user),
+    _: dict = Depends(get_current_user),
 ):
     """批量确认报警。"""
     alert_ids = body.alert_ids

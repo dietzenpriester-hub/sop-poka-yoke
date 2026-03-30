@@ -18,11 +18,11 @@ import {
   type RecentAlert,
   type StationStatusItem,
 } from "@/api/dashboard";
+import { severityTagType } from "@/utils/severity";
 
 const overview = ref<DashboardOverview | null>(null);
 const stationStatus = ref<StationStatusItem[]>([]);
 const recentAlerts = ref<RecentAlert[]>([]);
-const hourlyTrend = ref<HourlyTrend | null>(null);
 const loading = ref(false);
 
 /** 用于 WebSocket：取首个工位 ID，避免硬编码 */
@@ -36,14 +36,6 @@ const { ready: wsReady } = useStationWebSocket(wsStationId, () => {
 
 let refreshTimer: ReturnType<typeof setInterval> | null = null;
 let requestSeq = 0;
-
-function severityTagType(sev: string): "success" | "info" | "warning" | "danger" {
-  const u = sev?.toUpperCase() ?? "";
-  if (u === "CRITICAL" || u === "ERROR") return "danger";
-  if (u === "WARN") return "warning";
-  if (u === "INFO") return "info";
-  return "info";
-}
 
 function formatAlertTime(iso: string): string {
   if (!iso) return "—";
@@ -115,7 +107,6 @@ async function loadDashboard() {
       recentAlerts.value = alRes.value.data;
     }
     if (trRes.status === "fulfilled") {
-      hourlyTrend.value = trRes.value.data;
       applyTrendChart(trRes.value.data);
     }
 

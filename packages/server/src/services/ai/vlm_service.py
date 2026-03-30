@@ -19,7 +19,7 @@ class VLMService:
     def __init__(
         self,
         ollama_url: str = "http://localhost:11434",
-        model: str = "qwen2.5vl:3b",
+        model: str = "qwen2.5-vl:3b",
         timeout: float = 120.0,
         max_retries: int = 2,
     ):

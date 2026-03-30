@@ -3,6 +3,8 @@ import { ref, onMounted } from "vue";
 import { ElMessage } from "element-plus";
 import { replayApi, type VideoClip } from "@/api/replay";
 import VideoPlayer from "@/components/VideoPlayer.vue";
+import { parseErrorMsg } from "@/utils/httpError";
+import { formatDateTime } from "@/utils/date";
 
 const clips = ref<VideoClip[]>([]);
 const loading = ref(false);
@@ -30,8 +32,8 @@ async function loadClips() {
     }
     const { data } = await replayApi.listClips(params as Parameters<typeof replayApi.listClips>[0]);
     clips.value = data.items;
-  } catch {
-    ElMessage.error("加载视频列表失败");
+  } catch (e: unknown) {
+    ElMessage.error(parseErrorMsg(e, "加载视频列表失败"));
   } finally {
     loading.value = false;
   }
@@ -44,11 +46,6 @@ function playClip(clip: VideoClip) {
   }
   selectedClip.value = clip;
   showPlayer.value = true;
-}
-
-function formatTime(ts: string | null): string {
-  if (!ts) return "-";
-  return new Date(ts).toLocaleString("zh-CN");
 }
 
 function clipTypeLabel(clip: VideoClip): string {
@@ -149,7 +146,7 @@ onMounted(() => loadClips());
               <span v-if="clip.station_code"> | {{ clip.station_code }}</span>
             </div>
             <div style="font-size: 12px; color: #bbb; margin-top: 4px">
-              {{ formatTime(clip.created_at) }}
+              {{ formatDateTime(clip.created_at) }}
             </div>
           </div>
         </el-card>
@@ -177,7 +174,7 @@ onMounted(() => loadClips());
       <div style="margin-top: 12px; color: #666; font-size: 13px">
         <p v-if="selectedClip?.sn"><strong>工单:</strong> {{ selectedClip.sn }}</p>
         <p v-if="selectedClip?.station_code"><strong>工位:</strong> {{ selectedClip.station_code }}</p>
-        <p><strong>时间:</strong> {{ formatTime(selectedClip?.created_at || null) }}</p>
+        <p><strong>时间:</strong> {{ formatDateTime(selectedClip?.created_at) }}</p>
         <p v-if="selectedClip?.type === 'alert'">
           <strong>报警:</strong> {{ selectedClip.alert_type }} / {{ selectedClip.severity }} — {{ selectedClip.message }}
         </p>

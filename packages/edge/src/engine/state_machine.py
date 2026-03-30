@@ -44,6 +44,7 @@ _STEP_KW_FIELDS = {f.name for f in fields(StepDefinition)} - {"index"}
 
 
 class SOPStateMachine:
+    MIN_CONFIDENCE = 0.6
 
     def __init__(self, sop_template: dict, debounce_seconds: float = 0.5) -> None:
         self.template_name = sop_template["name"]
@@ -89,7 +90,7 @@ class SOPStateMachine:
         matches = action_result.get("matches_expected", False)
         confidence = action_result.get("confidence", 0.0)
 
-        if matches and confidence >= 0.6:
+        if matches and confidence >= self.MIN_CONFIDENCE:
             now = time.time()
             if self._pending_match is None:
                 self._pending_match = action_result
@@ -101,7 +102,7 @@ class SOPStateMachine:
         else:
             self._pending_match = None
 
-        if matches and confidence >= 0.6:
+        if matches and confidence >= self.MIN_CONFIDENCE:
             self.results.append(StepResult(
                 step_index=self.current_step_index, step_name=current_step.name,
                 result="OK", confidence=confidence, timestamp=time.time(),

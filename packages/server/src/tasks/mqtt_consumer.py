@@ -129,7 +129,7 @@ def start_mqtt_consumer_in_thread() -> threading.Thread:
     try:
         loop = asyncio.get_running_loop()
     except RuntimeError:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.new_event_loop()
     t = threading.Thread(target=_run_mqtt_loop, args=(loop,), daemon=True, name="mqtt-consumer")
     t.start()
     _mqtt_thread = t

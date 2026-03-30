@@ -21,6 +21,7 @@ import {
 import { alertApi } from "@/api/alert";
 import { useAuthStore } from "@/stores/auth";
 import { getJwtRole } from "@/utils/jwt";
+import { STORAGE_TOKEN_KEY } from "@/utils/constants";
 
 const router = useRouter();
 const route = useRoute();
@@ -52,7 +53,7 @@ const allMenuItems: MenuItem[] = [
 ];
 
 function jwtRole(): string | null {
-  const token = sessionStorage.getItem("sop_token");
+  const token = sessionStorage.getItem(STORAGE_TOKEN_KEY);
   if (!token) return null;
   return getJwtRole(token);
 }
@@ -68,8 +69,10 @@ const menuItems = computed(() =>
   allMenuItems.filter((item) => !item.meta?.requiresAdmin || isAdmin.value)
 );
 
+const auth = useAuthStore();
+
 async function refreshBadge() {
-  if (!sessionStorage.getItem("sop_token")) return;
+  if (!sessionStorage.getItem(STORAGE_TOKEN_KEY)) return;
   try {
     const { data } = await alertApi.unacknowledgedCount();
     unacknowledgedCount.value = data.count;
@@ -79,7 +82,7 @@ async function refreshBadge() {
 }
 
 function handleLogout() {
-  useAuthStore().logout();
+  auth.logout();
   router.push("/login");
 }
 

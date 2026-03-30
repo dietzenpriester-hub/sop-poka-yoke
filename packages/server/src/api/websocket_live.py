@@ -64,7 +64,7 @@ async def websocket_live(websocket: WebSocket, station_id: str):
             except json.JSONDecodeError:
                 logger.warning("无效 JSON: station={}", station_id)
                 continue
-            logger.info("收到消息: station={}, msg={}", station_id, msg)
+            logger.debug("收到消息: station={}, msg={}", station_id, msg)
     except WebSocketDisconnect:
         pass
     finally:
@@ -85,7 +85,8 @@ async def broadcast_to_station(station_id: str, message: dict[str, Any]) -> None
     for ws in list(active_connections[station_id]):
         try:
             await ws.send_json(message)
-        except Exception:
+        except Exception as e:
+            logger.exception("WebSocket 广播失败: station={} error={}", station_id, e)
             dead.append(ws)
     for ws in dead:
         try:

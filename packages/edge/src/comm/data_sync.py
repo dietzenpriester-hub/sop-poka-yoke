@@ -19,6 +19,9 @@ from minio import Minio
 if TYPE_CHECKING:
     from src.storage.sqlite_store import SQLiteStore
 
+QUEUE_POLL_INTERVAL_SEC = 0.05
+MAX_SEND_RETRIES = 5
+
 
 class MinIOUploader:
 
@@ -115,19 +118,24 @@ class OfflineDataSync:
         while not self._stop.is_set():
             task = self._pop_task()
             if task is None:
-                time.sleep(0.05)
+                time.sleep(QUEUE_POLL_INTERVAL_SEC)
                 continue
             try:
                 if task.priority == Priority.P3:
-                    time.sleep(0.05)
+                    time.sleep(QUEUE_POLL_INTERVAL_SEC)
                 self._sender(task.payload)
             except Exception as e:
                 retries = getattr(task, "_retries", 0) + 1
-                if retries >= 5:
+                if retries >= MAX_SEND_RETRIES:
                     self._persist_dead_letter(task, e)
                     continue
                 task._retries = retries
-                logger.warning("补传发送失败 ({}/5)，重新入队: {}", retries, e)
+                logger.warning(
+                    "补传发送失败 ({}/{}），重新入队: {}",
+                    retries,
+                    MAX_SEND_RETRIES,
+                    e,
+                )
                 with self._lock:
                     heapq.heappush(self._queue, task)
 

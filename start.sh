@@ -71,11 +71,11 @@ else
     echo -e "  ${GREEN}✓${NC} Ollama 已启动"
 fi
 
-if curl -s http://localhost:11434/api/tags | grep -q "qwen2.5vl"; then
-    echo -e "  ${GREEN}✓${NC} qwen2.5vl:3b 模型已就绪"
+if curl -s http://localhost:11434/api/tags | grep -q "qwen2.5-vl:3b"; then
+    echo -e "  ${GREEN}✓${NC} qwen2.5-vl:3b 模型已就绪"
 else
-    echo -e "  ${YELLOW}!${NC} qwen2.5vl:3b 模型未找到，正在拉取（约 3GB）..."
-    ollama pull qwen2.5vl:3b
+    echo -e "  ${YELLOW}!${NC} qwen2.5-vl:3b 模型未找到，正在拉取（约 3GB）..."
+    ollama pull qwen2.5-vl:3b
 fi
 
 # 2. MinIO

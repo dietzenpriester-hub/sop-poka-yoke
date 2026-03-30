@@ -96,5 +96,8 @@ async def delete_workorder(
     wo = await _svc.get_by_id(db, workorder_id)
     if not wo:
         raise HTTPException(status_code=404, detail="工单不存在")
-    await _svc.delete(db, wo)
+    try:
+        await _svc.delete(db, wo)
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e)) from e
     return {"message": "工单已删除"}

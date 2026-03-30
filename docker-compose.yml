@@ -41,7 +41,7 @@ services:
     restart: unless-stopped
 
   mqtt:
-    image: eclipse-mosquitto:2
+    image: eclipse-mosquitto:2.0.18
     ports:
       - "127.0.0.1:1883:1883"
       - "127.0.0.1:9883:9883"
@@ -65,7 +65,7 @@ services:
       SOP_MINIO_ENDPOINT: minio:9000
       SOP_MINIO_ACCESS_KEY: minioadmin
       SOP_MINIO_SECRET_KEY: ${MINIO_PASSWORD:-changeme}
-      SOP_JWT_SECRET: ${JWT_SECRET:-sop-pokayoke-secret-key-change-in-production}
+      SOP_JWT_SECRET: ${SOP_JWT_SECRET:-sop-pokayoke-secret-key-change-in-production}
       SOP_CORS_ORIGINS: ${CORS_ORIGINS:-["http://localhost:5173","http://127.0.0.1:5173"]}
     depends_on:
       postgres:

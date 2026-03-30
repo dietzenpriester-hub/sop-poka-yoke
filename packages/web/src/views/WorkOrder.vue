@@ -5,6 +5,7 @@ import { workorderApi, type WorkOrderItem, type StepRecordItem } from "@/api/wor
 import { stationApi, type StationItem } from "@/api/station";
 import { sopApi, type SOPTemplate } from "@/api/sop";
 import { parseErrorMsg } from "@/utils/httpError";
+import { formatDateTime } from "@/utils/date";
 
 const workorders = ref<WorkOrderItem[]>([]);
 const loading = ref(false);
@@ -37,11 +38,6 @@ const stationNameById = computed(() => {
   for (const s of stations.value) m.set(s.id, s.name);
   return m;
 });
-
-function formatTime(ts: string | null | undefined): string {
-  if (!ts) return "—";
-  return new Date(ts).toLocaleString("zh-CN");
-}
 
 function statusTagType(
   status: string
@@ -243,10 +239,10 @@ onMounted(() => {
         </template>
       </el-table-column>
       <el-table-column prop="start_time" label="开始时间" width="170">
-        <template #default="{ row }">{{ formatTime(row.start_time) }}</template>
+        <template #default="{ row }">{{ formatDateTime(row.start_time) }}</template>
       </el-table-column>
       <el-table-column prop="end_time" label="结束时间" width="170">
-        <template #default="{ row }">{{ formatTime(row.end_time) }}</template>
+        <template #default="{ row }">{{ formatDateTime(row.end_time) }}</template>
       </el-table-column>
       <el-table-column label="操作" width="220" fixed="right">
         <template #default="{ row }">
@@ -336,10 +332,10 @@ onMounted(() => {
               {{ detailWorkorder.sop_template_id ?? "—" }}
             </el-descriptions-item>
             <el-descriptions-item label="开始时间">
-              {{ formatTime(detailWorkorder.start_time) }}
+              {{ formatDateTime(detailWorkorder.start_time) }}
             </el-descriptions-item>
             <el-descriptions-item label="结束时间">
-              {{ formatTime(detailWorkorder.end_time) }}
+              {{ formatDateTime(detailWorkorder.end_time) }}
             </el-descriptions-item>
           </el-descriptions>
 
@@ -354,7 +350,7 @@ onMounted(() => {
             </el-table-column>
             <el-table-column prop="confidence" label="置信度" width="90" />
             <el-table-column prop="created_at" label="时间" width="160">
-              <template #default="{ row: r }">{{ formatTime(r.created_at) }}</template>
+              <template #default="{ row: r }">{{ formatDateTime(r.created_at) }}</template>
             </el-table-column>
             <el-table-column label="快照" width="88">
               <template #default="{ row: r }">

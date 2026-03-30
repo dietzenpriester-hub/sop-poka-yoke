@@ -4,6 +4,8 @@ import threading
 
 import numpy as np
 
+MIN_NORM_EPS = 1e-8
+
 
 class ActionEmbeddingComparator:
 
@@ -15,7 +17,7 @@ class ActionEmbeddingComparator:
 
     def set_reference(self, step_index: int, embedding: np.ndarray) -> None:
         norm = np.linalg.norm(embedding)
-        if norm < 1e-8:
+        if norm < MIN_NORM_EPS:
             raise ValueError(f"参考 embedding 范数接近零: step_index={step_index}")
         with self._reference_lock:
             self.reference_embeddings[step_index] = embedding / norm
@@ -26,7 +28,7 @@ class ActionEmbeddingComparator:
                 return {"similarity": 0.0, "status": "UNKNOWN"}
             ref = self.reference_embeddings[step_index]
         norm = np.linalg.norm(current_embedding)
-        if norm < 1e-8:
+        if norm < MIN_NORM_EPS:
             return {"similarity": 0.0, "status": "UNKNOWN"}
         cur = current_embedding / norm
         similarity = float(np.dot(ref, cur))

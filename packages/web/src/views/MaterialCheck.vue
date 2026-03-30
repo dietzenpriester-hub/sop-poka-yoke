@@ -3,6 +3,7 @@ import { ref, onMounted } from "vue";
 import { ElMessage } from "element-plus";
 import { materialCheckApi, type MaterialCheckItem, type MaterialCheckStats } from "@/api/materialCheck";
 import { parseErrorMsg } from "@/utils/httpError";
+import { formatDateTime } from "@/utils/date";
 
 const rows = ref<MaterialCheckItem[]>([]);
 const total = ref(0);
@@ -22,10 +23,6 @@ const filters = ref({
 });
 const page = ref(1);
 const pageSize = ref(50);
-
-function formatTime(ts: string): string {
-  return new Date(ts).toLocaleString("zh-CN");
-}
 
 function resultTagType(r: string): "success" | "warning" | "danger" | "info" {
   switch (r) {
@@ -201,7 +198,7 @@ onMounted(() => {
         </template>
       </el-table-column>
       <el-table-column prop="checked_at" label="检验时间" width="170">
-        <template #default="{ row }">{{ formatTime(row.checked_at) }}</template>
+        <template #default="{ row }">{{ formatDateTime(row.checked_at) }}</template>
       </el-table-column>
     </el-table>
 

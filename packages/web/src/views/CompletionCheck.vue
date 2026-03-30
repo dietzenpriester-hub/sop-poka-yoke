@@ -3,6 +3,7 @@ import { ref, onMounted } from "vue";
 import { ElMessage } from "element-plus";
 import { completionCheckApi, type CompletionCheckItem, type CompletionCheckStats } from "@/api/completionCheck";
 import { parseErrorMsg } from "@/utils/httpError";
+import { formatDateTime } from "@/utils/date";
 
 const rows = ref<CompletionCheckItem[]>([]);
 const total = ref(0);
@@ -15,10 +16,6 @@ const pageSize = ref(50);
 
 const showDetailDialog = ref(false);
 const detailItem = ref<CompletionCheckItem | null>(null);
-
-function formatTime(ts: string): string {
-  return new Date(ts).toLocaleString("zh-CN");
-}
 
 function resultTagType(r: string): "success" | "warning" | "danger" | "info" {
   switch (r) {
@@ -175,7 +172,7 @@ onMounted(() => {
         </template>
       </el-table-column>
       <el-table-column prop="checked_at" label="检验时间" width="170">
-        <template #default="{ row }">{{ formatTime(row.checked_at) }}</template>
+        <template #default="{ row }">{{ formatDateTime(row.checked_at) }}</template>
       </el-table-column>
       <el-table-column label="操作" width="80" fixed="right">
         <template #default="{ row }">
@@ -207,7 +204,7 @@ onMounted(() => {
           </el-descriptions-item>
           <el-descriptions-item label="相似度">{{ similarityPercent(detailItem.similarity_score) }}</el-descriptions-item>
           <el-descriptions-item label="缺陷描述" :span="2">{{ detailItem.defects || "无" }}</el-descriptions-item>
-          <el-descriptions-item label="检验时间" :span="2">{{ formatTime(detailItem.checked_at) }}</el-descriptions-item>
+          <el-descriptions-item label="检验时间" :span="2">{{ formatDateTime(detailItem.checked_at) }}</el-descriptions-item>
         </el-descriptions>
 
         <el-divider content-position="left">照片对比</el-divider>

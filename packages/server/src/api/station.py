@@ -44,7 +44,7 @@ async def create_station(
 async def station_stats(
     station_id: int,
     db: AsyncSession = Depends(get_db),
-    user: dict = Depends(get_current_user),
+    _: dict = Depends(get_current_user),
 ):
     """工位关联统计：工单数、报警数。"""
     from src.models.alert import AlertEvent
@@ -74,7 +74,7 @@ async def station_stats(
 async def get_station(
     station_id: int,
     db: AsyncSession = Depends(get_db),
-    user: dict = Depends(get_current_user),
+    _: dict = Depends(get_current_user),
 ):
     result = await db.execute(select(Station).where(Station.id == station_id))
     station = result.scalar_one_or_none()

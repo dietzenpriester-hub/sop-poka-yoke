@@ -3,6 +3,7 @@ import { ref, onMounted } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { stationApi, type StationItem, type StationStats } from "@/api/station";
 import { parseErrorMsg } from "@/utils/httpError";
+import { formatDateTime } from "@/utils/date";
 
 const stations = ref<StationItem[]>([]);
 const loading = ref(false);
@@ -24,8 +25,8 @@ async function loadStations() {
     if (lineFilter.value) params.line_id = lineFilter.value;
     const { data } = await stationApi.list(params as Parameters<typeof stationApi.list>[0]);
     stations.value = data;
-  } catch {
-    ElMessage.error("加载工位列表失败");
+  } catch (e: unknown) {
+    ElMessage.error(parseErrorMsg(e, "加载工位列表失败"));
   } finally {
     loading.value = false;
   }
@@ -87,13 +88,9 @@ async function viewStats(station: StationItem) {
     const { data } = await stationApi.stats(station.id);
     stationStats.value = data;
     showStatsDialog.value = true;
-  } catch {
-    ElMessage.error("获取统计失败");
+  } catch (e: unknown) {
+    ElMessage.error(parseErrorMsg(e, "获取统计失败"));
   }
-}
-
-function formatTime(ts: string): string {
-  return new Date(ts).toLocaleString("zh-CN");
 }
 
 onMounted(() => loadStations());
@@ -123,7 +120,7 @@ onMounted(() => loadStations());
       <el-table-column prop="rtsp_url" label="摄像头 URL" min-width="200" show-overflow-tooltip />
       <el-table-column prop="description" label="描述" min-width="150" show-overflow-tooltip />
       <el-table-column prop="created_at" label="创建时间" width="170">
-        <template #default="{ row }">{{ formatTime(row.created_at) }}</template>
+        <template #default="{ row }">{{ formatDateTime(row.created_at) }}</template>
       </el-table-column>
       <el-table-column label="操作" width="240" fixed="right">
         <template #default="{ row }">

@@ -1,15 +1,21 @@
 import axios, { type AxiosInstance } from "axios";
+import {
+  STORAGE_TOKEN_KEY,
+  LOGIN_PATH,
+  API_TIMEOUT_MS,
+  UPLOAD_TIMEOUT_MS,
+} from "@/utils/constants";
 
 function clearSession() {
-  sessionStorage.removeItem("sop_token");
-  if (!window.location.pathname.startsWith("/login")) {
-    window.location.href = "/login";
+  sessionStorage.removeItem(STORAGE_TOKEN_KEY);
+  if (!window.location.pathname.startsWith(LOGIN_PATH)) {
+    window.location.href = LOGIN_PATH;
   }
 }
 
 function attachInterceptors(instance: AxiosInstance): void {
   instance.interceptors.request.use((config) => {
-    const token = sessionStorage.getItem("sop_token");
+    const token = sessionStorage.getItem(STORAGE_TOKEN_KEY);
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }
@@ -32,13 +38,13 @@ function attachInterceptors(instance: AxiosInstance): void {
 
 const api = axios.create({
   baseURL: import.meta.env.VITE_API_BASE || "/api",
-  timeout: 10000,
+  timeout: API_TIMEOUT_MS,
 });
 attachInterceptors(api);
 
 const apiUpload = axios.create({
   baseURL: import.meta.env.VITE_API_BASE || "/api",
-  timeout: 300000,
+  timeout: UPLOAD_TIMEOUT_MS,
 });
 attachInterceptors(apiUpload);
 

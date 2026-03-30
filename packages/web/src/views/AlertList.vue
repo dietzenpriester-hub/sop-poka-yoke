@@ -2,6 +2,9 @@
 import { ref, onMounted, onUnmounted } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { alertApi, type AlertItem, type AlertStats } from "@/api/alert";
+import { parseErrorMsg } from "@/utils/httpError";
+import { formatDateTime } from "@/utils/date";
+import { severityTagType } from "@/utils/severity";
 
 const alerts = ref<AlertItem[]>([]);
 const stats = ref<AlertStats>({ total: 0, unacknowledged: 0, by_severity: {} });
@@ -29,9 +32,9 @@ async function loadAlerts() {
     const { data } = await alertApi.list(params as Parameters<typeof alertApi.list>[0]);
     if (reqId !== alertReqId) return;
     alerts.value = data;
-  } catch {
+  } catch (e: unknown) {
     if (reqId !== alertReqId) return;
-    ElMessage.error("加载报警列表失败");
+    ElMessage.error(parseErrorMsg(e, "加载报警列表失败"));
   } finally {
     if (reqId === alertReqId) loading.value = false;
   }
@@ -41,8 +44,8 @@ async function loadStats() {
   try {
     const { data } = await alertApi.stats();
     stats.value = data;
-  } catch {
-    ElMessage.warning("统计数据加载失败，显示可能不准确");
+  } catch (e: unknown) {
+    ElMessage.warning(parseErrorMsg(e, "统计数据加载失败"));
   }
 }
 
@@ -52,8 +55,8 @@ async function handleAcknowledge(id: number) {
     ElMessage.success("已确认");
     loadAlerts();
     loadStats();
-  } catch {
-    ElMessage.error("确认失败");
+  } catch (e: unknown) {
+    ElMessage.error(parseErrorMsg(e, "确认失败"));
   }
 }
 
@@ -74,26 +77,12 @@ async function handleBatchAcknowledge() {
     loadAlerts();
     loadStats();
   } catch (e) {
-    if (e !== "cancel") ElMessage.error("批量确认失败");
+    if (e !== "cancel") ElMessage.error(parseErrorMsg(e, "批量确认失败"));
   }
 }
 
 function handleSelectionChange(rows: AlertItem[]) {
   selectedIds.value = rows.map((r) => r.id);
-}
-
-function severityTagType(severity: string): "" | "success" | "warning" | "danger" | "info" {
-  switch (severity) {
-    case "CRITICAL": return "danger";
-    case "ERROR": return "danger";
-    case "WARN": return "warning";
-    case "INFO": return "info";
-    default: return "";
-  }
-}
-
-function formatTime(ts: string): string {
-  return new Date(ts).toLocaleString("zh-CN");
 }
 
 function handleSearch() {
@@ -235,7 +224,7 @@ onUnmounted(() => {
         </template>
       </el-table-column>
       <el-table-column prop="created_at" label="时间" width="170">
-        <template #default="{ row }">{{ formatTime(row.created_at) }}</template>
+        <template #default="{ row }">{{ formatDateTime(row.created_at) }}</template>
       </el-table-column>
       <el-table-column label="操作" width="100" fixed="right">
         <template #default="{ row }">

@@ -4,6 +4,7 @@ import { ElMessage } from "element-plus";
 import { useECharts } from "@/composables/useECharts";
 import { overrideLogApi, type OverrideLogItem, type OverrideStats } from "@/api/overrideLog";
 import { parseErrorMsg } from "@/utils/httpError";
+import { formatDateTime } from "@/utils/date";
 
 const stats = ref<OverrideStats | null>(null);
 const statsLoading = ref(false);
@@ -21,10 +22,6 @@ const page = ref(1);
 const pageSize = ref(20);
 
 const { chartRef: trendChartRef, setOption: setTrendOption, resize } = useECharts();
-
-function formatTime(ts: string): string {
-  return new Date(ts).toLocaleString("zh-CN");
-}
 
 function applyTrendChart() {
   const s = stats.value;
@@ -214,7 +211,7 @@ onMounted(() => {
         </template>
       </el-table-column>
       <el-table-column prop="created_at" label="时间" width="180">
-        <template #default="{ row }">{{ formatTime(row.created_at) }}</template>
+        <template #default="{ row }">{{ formatDateTime(row.created_at) }}</template>
       </el-table-column>
     </el-table>
 

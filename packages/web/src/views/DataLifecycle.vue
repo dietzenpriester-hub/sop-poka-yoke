@@ -9,6 +9,7 @@ import {
   type CleanupLog,
 } from "@/api/lifecycle";
 import { parseErrorMsg } from "@/utils/httpError";
+import { formatDateTime } from "@/utils/date";
 
 const loading = ref(false);
 const stats = ref<StorageStats | null>(null);
@@ -104,11 +105,6 @@ async function executeCleanup() {
   }
 }
 
-function formatTime(ts: string | null): string {
-  if (!ts) return "—";
-  return new Date(ts).toLocaleString("zh-CN");
-}
-
 onMounted(() => loadAll());
 </script>
 
@@ -197,10 +193,10 @@ onMounted(() => loadAll());
         </el-table-column>
         <el-table-column prop="error_message" label="错误" min-width="120" show-overflow-tooltip />
         <el-table-column prop="started_at" label="开始时间" width="170">
-          <template #default="{ row }">{{ formatTime(row.started_at) }}</template>
+          <template #default="{ row }">{{ formatDateTime(row.started_at) }}</template>
         </el-table-column>
         <el-table-column prop="completed_at" label="结束时间" width="170">
-          <template #default="{ row }">{{ formatTime(row.completed_at) }}</template>
+          <template #default="{ row }">{{ formatDateTime(row.completed_at) }}</template>
         </el-table-column>
       </el-table>
     </el-card>

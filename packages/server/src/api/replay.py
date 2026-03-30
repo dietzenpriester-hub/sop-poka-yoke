@@ -47,7 +47,7 @@ async def list_clips(
     skip: int = Query(default=0, ge=0),
     limit: int = Query(default=30, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
-    user: dict = Depends(get_current_user),
+    _: dict = Depends(get_current_user),
 ):
     """查询视频片段列表。合并步骤视频和报警视频。"""
     clips: list[dict] = []
@@ -116,7 +116,7 @@ async def list_clips(
 @router.get("/clip-url")
 async def get_clip_url(
     object_name: str,
-    user: dict = Depends(get_current_user),
+    _: dict = Depends(get_current_user),
 ):
     """获取单个视频的预签名播放 URL。"""
     _validate_clip_object_name(object_name)

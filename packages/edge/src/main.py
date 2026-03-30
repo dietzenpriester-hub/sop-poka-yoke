@@ -66,7 +66,7 @@ def _try_init_vlm():
         from src.inference.vlm_recognizer import VLMClient
         vlm = VLMClient(
             base_url=os.environ.get("SOP_OLLAMA_URL", "http://localhost:11434"),
-            model=os.environ.get("SOP_VLM_MODEL", "qwen2.5vl:3b"),
+            model=os.environ.get("SOP_VLM_MODEL", "qwen2.5-vl:3b"),
         )
         warmup_frame = np.zeros((100, 100, 3), dtype=np.uint8)
         result = vlm.classify_action([warmup_frame], {"steps": [{"name": "warmup"}], "current_step_index": 0})
@@ -144,7 +144,7 @@ def main() -> None:
             mqtt_client.publish(topic, payload)
         logger.warning("[报警] {}", json.dumps(payload, ensure_ascii=False)[:200])
 
-    # 本地库：步骤记录 + 补传死信（P0：禁止静默丢弃）
+    # 本地库：步骤记录；补传失败时写入死信以便后续处理
     local_db = SQLiteStore(str(repo_root / "data/edge_local.db"))
     sync = OfflineDataSync(
         sender=lambda p: send_detection(p),
@@ -164,7 +164,8 @@ def main() -> None:
     )
 
     if vlm:
-        BOMValidator(vlm, detector)  # 预留：物料校验等扩展
+        # TODO: 接入工单/物料流程后启用 BOM 校验与告警联动
+        bom_validator = BOMValidator(vlm, detector)
 
     stream.start()
     fsm.start("DEMO-SN-001")
