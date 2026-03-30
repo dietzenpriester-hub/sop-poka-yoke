@@ -49,6 +49,15 @@ app.add_middleware(
 
 app.include_router(api_router, prefix="/api")
 
+try:
+    from prometheus_fastapi_instrumentator import Instrumentator
+    Instrumentator(
+        should_group_status_codes=True,
+        excluded_handlers=["/health", "/metrics"],
+    ).instrument(app).expose(app, endpoint="/metrics", include_in_schema=False)
+except ImportError:
+    logger.warning("prometheus-fastapi-instrumentator 未安装，/metrics 端点不可用")
+
 
 @app.exception_handler(ValueError)
 async def value_error_handler(request: Request, exc: ValueError):
