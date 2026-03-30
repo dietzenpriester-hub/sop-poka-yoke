@@ -5,6 +5,7 @@ import { alertApi, type AlertItem, type AlertStats } from "@/api/alert";
 import { parseErrorMsg } from "@/utils/httpError";
 import { formatDateTime } from "@/utils/date";
 import { severityTagType } from "@/utils/severity";
+import { downloadExcel } from "@/utils/export";
 
 const alerts = ref<AlertItem[]>([]);
 const stats = ref<AlertStats>({ total: 0, unacknowledged: 0, by_severity: {} });
@@ -57,6 +58,17 @@ async function handleAcknowledge(id: number) {
     loadStats();
   } catch (e: unknown) {
     ElMessage.error(parseErrorMsg(e, "确认失败"));
+  }
+}
+
+async function handleExport() {
+  try {
+    const params: Record<string, string | undefined> = {};
+    if (filters.value.severity) params.severity = filters.value.severity;
+    await downloadExcel("/export/alerts", "报警记录.xlsx", params);
+    ElMessage.success("导出成功");
+  } catch {
+    ElMessage.error("导出失败");
   }
 }
 
@@ -119,6 +131,7 @@ onUnmounted(() => {
       <h2>报警管理</h2>
       <div>
         <el-button type="primary" @click="loadAlerts" :loading="loading">刷新</el-button>
+        <el-button @click="handleExport">导出 Excel</el-button>
         <el-button type="warning" @click="handleBatchAcknowledge" :disabled="selectedIds.length === 0">
           批量确认 ({{ selectedIds.length }})
         </el-button>

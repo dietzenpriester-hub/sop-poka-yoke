@@ -6,6 +6,7 @@ import { stationApi, type StationItem } from "@/api/station";
 import { sopApi, type SOPTemplate } from "@/api/sop";
 import { parseErrorMsg } from "@/utils/httpError";
 import { formatDateTime } from "@/utils/date";
+import { downloadExcel } from "@/utils/export";
 
 const workorders = ref<WorkOrderItem[]>([]);
 const totalWorkorders = ref(0);
@@ -99,6 +100,19 @@ async function loadWorkorders() {
 function handleSearch() {
   pagination.value.skip = 0;
   loadWorkorders();
+}
+
+async function handleExport() {
+  try {
+    const params: Record<string, string | undefined> = {};
+    if (filters.value.status) params.status = filters.value.status;
+    if (filters.value.dateRange?.[0]) params.start_date = filters.value.dateRange[0];
+    if (filters.value.dateRange?.[1]) params.end_date = filters.value.dateRange[1];
+    await downloadExcel("/export/workorders", "工单列表.xlsx", params);
+    ElMessage.success("导出成功");
+  } catch {
+    ElMessage.error("导出失败");
+  }
 }
 
 function handleReset() {
@@ -199,6 +213,7 @@ onMounted(() => {
     <div class="page-header">
       <h2>工单管理</h2>
       <div class="page-header-actions">
+        <el-button @click="handleExport">导出 Excel</el-button>
         <el-button type="primary" @click="showCreateDialog = true">新建工单</el-button>
       </div>
     </div>
