@@ -21,6 +21,7 @@ const router = createRouter({
     { path: "/users", name: "users", component: () => import("@/views/UserManage.vue"), meta: { requiresAdmin: true } },
     { path: "/lifecycle", name: "lifecycle", component: () => import("@/views/DataLifecycle.vue"), meta: { requiresAdmin: true } },
     { path: "/notification", name: "notification", component: () => import("@/views/NotificationConfig.vue"), meta: { requiresAdmin: true } },
+    { path: "/audit", name: "audit", component: () => import("@/views/AuditLog.vue"), meta: { requiresAdmin: true } },
   ],
 });
 

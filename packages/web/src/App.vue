@@ -52,6 +52,7 @@ const allMenuItems: MenuItem[] = [
   { path: "/users", label: "用户管理", icon: User, meta: { requiresAdmin: true } },
   { path: "/lifecycle", label: "数据管理", icon: Delete, meta: { requiresAdmin: true } },
   { path: "/notification", label: "通知配置", icon: Bell, meta: { requiresAdmin: true } },
+  { path: "/audit", label: "审计日志", icon: List, meta: { requiresAdmin: true } },
 ];
 
 function jwtRole(): string | null {

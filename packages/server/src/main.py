@@ -47,6 +47,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+from src.middleware.audit import AuditMiddleware
+app.add_middleware(AuditMiddleware)
+
 app.include_router(api_router, prefix="/api")
 
 try:
