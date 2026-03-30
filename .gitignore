@@ -41,6 +41,7 @@ data/
 clips/
 logs/
 *.log
+backups/
 
 # Docker
 docker-compose.override.yml
