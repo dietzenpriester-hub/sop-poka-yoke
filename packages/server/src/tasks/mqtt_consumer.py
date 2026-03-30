@@ -58,6 +58,16 @@ async def _handle_alert(station_id: str, payload: dict) -> None:
             alert_id = alert.id
             persisted = True
             logger.info("报警已入库: id={} type={} station={}", alert.id, alert.alert_type, station_id)
+
+            from src.services import notification_service
+            notification_service.fire_and_forget_alert(
+                alert_type=alert.alert_type,
+                severity=alert.severity,
+                message=alert.message,
+                station_code=station_id,
+                step_index=alert.step_index,
+                alert_id=alert.id,
+            )
     except Exception as e:
         logger.error("报警入库失败: station={} error={}", station_id, e)
 

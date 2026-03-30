@@ -20,6 +20,7 @@ const router = createRouter({
     { path: "/override-log", name: "override-log", component: () => import("@/views/OverrideLog.vue"), meta: { requiresAdmin: true } },
     { path: "/users", name: "users", component: () => import("@/views/UserManage.vue"), meta: { requiresAdmin: true } },
     { path: "/lifecycle", name: "lifecycle", component: () => import("@/views/DataLifecycle.vue"), meta: { requiresAdmin: true } },
+    { path: "/notification", name: "notification", component: () => import("@/views/NotificationConfig.vue"), meta: { requiresAdmin: true } },
   ],
 });
 

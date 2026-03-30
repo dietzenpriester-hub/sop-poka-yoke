@@ -101,6 +101,17 @@ async def create_alert(
     db.add(alert)
     await db.commit()
     await db.refresh(alert)
+
+    from src.services import notification_service
+    notification_service.fire_and_forget_alert(
+        alert_type=alert.alert_type,
+        severity=alert.severity,
+        message=alert.message,
+        station_code=alert.station_code,
+        step_index=alert.step_index,
+        alert_id=alert.id,
+    )
+
     return alert
 
 

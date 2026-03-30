@@ -2,7 +2,7 @@
 
 from fastapi import APIRouter
 
-from src.api import alert, auth, completion_check, dashboard, data_lifecycle, export, learning, material_check, override_log, replay, report, sop, station, user, workorder
+from src.api import alert, auth, completion_check, dashboard, data_lifecycle, export, learning, material_check, notification, override_log, replay, report, sop, station, user, workorder
 from src.api.websocket_live import router as ws_router
 
 api_router = APIRouter()
@@ -22,4 +22,5 @@ api_router.include_router(completion_check.router, prefix="/completion-check", t
 api_router.include_router(override_log.router, prefix="/override-log", tags=["强制放行"])
 api_router.include_router(data_lifecycle.router, prefix="/lifecycle", tags=["数据生命周期"])
 api_router.include_router(export.router, prefix="/export", tags=["数据导出"])
+api_router.include_router(notification.router, prefix="/notification", tags=["通知配置"])
 api_router.include_router(ws_router, tags=["WebSocket"])

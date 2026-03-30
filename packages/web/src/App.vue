@@ -51,6 +51,7 @@ const allMenuItems: MenuItem[] = [
   { path: "/override-log", label: "放行审计", icon: Stamp, meta: { requiresAdmin: true } },
   { path: "/users", label: "用户管理", icon: User, meta: { requiresAdmin: true } },
   { path: "/lifecycle", label: "数据管理", icon: Delete, meta: { requiresAdmin: true } },
+  { path: "/notification", label: "通知配置", icon: Bell, meta: { requiresAdmin: true } },
 ];
 
 function jwtRole(): string | null {
