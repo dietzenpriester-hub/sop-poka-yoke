@@ -54,6 +54,11 @@ Thumbs.db
 .coverage
 htmlcov/
 
+# E2E 测试产物
+e2e/test-results/
+e2e/report/
+e2e/node_modules/
+
 # 本地数据库
 *.sqlite
 *.sqlite3
