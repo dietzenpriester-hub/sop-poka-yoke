@@ -1,15 +1,10 @@
-"""SOP API 测试"""
+"""SOP API 测试（使用 conftest 中的 test_app，避免连接生产库与 MQTT）。"""
 
 import pytest
-from httpx import ASGITransport, AsyncClient
-
-from src.main import app
 
 
 @pytest.mark.asyncio
-async def test_health():
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as client:
-        r = await client.get("/health")
-        assert r.status_code == 200
-        assert r.json()["status"] == "ok"
+async def test_health(async_client):
+    r = await async_client.get("/health")
+    assert r.status_code == 200
+    assert r.json()["status"] == "ok"
