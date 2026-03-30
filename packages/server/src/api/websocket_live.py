@@ -48,8 +48,10 @@ async def websocket_live(websocket: WebSocket, station_id: str):
         return
 
     user_role = user_payload.get("role", "") if isinstance(user_payload, dict) else ""
-    if user_role != "admin":
-        logger.info("WebSocket 非管理员连接: station={}, role={}", station_id, user_role)
+    if not user_role:
+        await websocket.close(code=4403)
+        return
+
     if station_id not in active_connections:
         active_connections[station_id] = []
     active_connections[station_id].append(websocket)

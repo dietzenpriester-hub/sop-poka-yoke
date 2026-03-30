@@ -20,6 +20,7 @@ import {
 } from "@element-plus/icons-vue";
 import { alertApi } from "@/api/alert";
 import { useAuthStore } from "@/stores/auth";
+import { getJwtRole } from "@/utils/jwt";
 
 const router = useRouter();
 const route = useRoute();
@@ -50,21 +51,10 @@ const allMenuItems: MenuItem[] = [
   { path: "/lifecycle", label: "数据管理", icon: Delete, meta: { requiresAdmin: true } },
 ];
 
-function base64UrlDecode(str: string): string {
-  let b = str.replace(/-/g, "+").replace(/_/g, "/");
-  while (b.length % 4) b += "=";
-  return atob(b);
-}
-
 function jwtRole(): string | null {
   const token = sessionStorage.getItem("sop_token");
   if (!token) return null;
-  try {
-    const payload = JSON.parse(base64UrlDecode(token.split(".")[1])) as { role?: string };
-    return typeof payload.role === "string" ? payload.role : null;
-  } catch {
-    return null;
-  }
+  return getJwtRole(token);
 }
 
 const isLoginPage = computed(() => route.path === "/login");

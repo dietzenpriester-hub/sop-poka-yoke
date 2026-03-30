@@ -46,6 +46,7 @@ export function useStationWebSocket(
     ws.onopen = () => {
       retryCount = 0;
       if (!token) {
+        intentionalClose = true;
         ws?.close();
         return;
       }

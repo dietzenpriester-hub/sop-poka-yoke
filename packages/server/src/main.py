@@ -23,10 +23,13 @@ async def lifespan(app: FastAPI):
     logger.info("SOP 服务端启动完成")
     yield
     stop_mqtt_consumer()
-    from src.services.ai.vlm_service import VLMService
-    for obj in list(globals().values()):
-        if isinstance(obj, VLMService):
-            await obj.close()
+    try:
+        from src.api.learning import _service as learning_svc
+        if learning_svc._pipeline is not None:
+            await learning_svc._pipeline.vlm_service.close()
+            logger.info("VLM 服务已关闭")
+    except Exception as e:
+        logger.debug("VLM 关闭时异常（可忽略）: {}", e)
     logger.info("SOP 服务端正在关闭")
 
 

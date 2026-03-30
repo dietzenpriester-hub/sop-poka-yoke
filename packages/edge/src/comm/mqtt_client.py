@@ -35,7 +35,11 @@ class MQTTClient:
         logger.info("MQTT 已连接: {}:{} (TLS={})", self.broker, self.port, use_tls)
 
     def publish(self, topic: str, payload: dict[str, Any]) -> None:
-        info = self._client.publish(topic, json.dumps(payload, ensure_ascii=False))
+        data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        if len(data) > MAX_PAYLOAD_BYTES:
+            logger.warning("MQTT publish 消息过大 ({}B)，已丢弃: topic={}", len(data), topic)
+            return
+        info = self._client.publish(topic, data)
         if info.rc != mqtt.MQTT_ERR_SUCCESS:
             logger.warning("MQTT publish 失败: rc={} topic={}", info.rc, topic)
 

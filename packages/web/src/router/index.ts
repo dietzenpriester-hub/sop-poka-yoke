@@ -1,24 +1,5 @@
 import { createRouter, createWebHistory } from "vue-router";
-
-function base64UrlDecode(str: string): string {
-  let base64 = str.replace(/-/g, "+").replace(/_/g, "/");
-  while (base64.length % 4) base64 += "=";
-  return atob(base64);
-}
-
-function parseJwtPayload(token: string): Record<string, unknown> | null {
-  try {
-    return JSON.parse(base64UrlDecode(token.split(".")[1]));
-  } catch {
-    return null;
-  }
-}
-
-function isTokenExpired(token: string): boolean {
-  const payload = parseJwtPayload(token);
-  if (!payload || typeof payload.exp !== "number") return true;
-  return Date.now() / 1000 > payload.exp;
-}
+import { parseJwtPayload, isTokenExpired } from "@/utils/jwt";
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),

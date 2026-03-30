@@ -14,7 +14,9 @@ class VisualInspector:
         from pathlib import Path
         rp = Path(reference_image_path).resolve()
         allowed_root = Path(__file__).resolve().parents[3] / "data"
-        if not str(rp).startswith(str(allowed_root)):
+        try:
+            rp.relative_to(allowed_root)
+        except ValueError:
             return {"result": "ERROR", "message": f"参考图路径不在允许目录内: {rp}"}
         ref_image = cv2.imread(str(rp))
         if ref_image is None:
