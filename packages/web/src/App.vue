@@ -110,10 +110,9 @@ onUnmounted(() => {
   <el-container v-else class="app-layout">
     <el-aside :width="isCollapse ? '64px' : '220px'" class="app-sidebar">
       <div class="sidebar-brand">
-        <svg class="sidebar-logo" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <rect x="2" y="2" width="28" height="28" rx="7" fill="rgba(64,158,255,0.2)" />
-          <path d="M10 16l5 5 7-9" stroke="#409eff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" />
-        </svg>
+        <span class="sidebar-tc-logo">
+          <span class="tc-thunder">T</span><span class="tc-comm">c</span>
+        </span>
         <transition name="brand-fade">
           <span v-if="!isCollapse" class="sidebar-brand-text">SOP 防呆</span>
         </transition>
@@ -207,10 +206,21 @@ body {
   border-bottom: 1px solid rgba(255, 255, 255, 0.06);
 }
 
-.sidebar-logo {
-  width: 28px;
-  height: 28px;
+.sidebar-tc-logo {
   flex-shrink: 0;
+  font-size: 22px;
+  line-height: 1;
+}
+
+.tc-thunder {
+  font-weight: 700;
+  font-style: italic;
+  color: #e31b23;
+}
+
+.tc-comm {
+  font-weight: 400;
+  color: #e31b23;
 }
 
 .sidebar-brand-text {

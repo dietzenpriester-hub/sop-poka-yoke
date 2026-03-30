@@ -46,11 +46,8 @@ async function handleLogin() {
 
     <div class="login-container">
       <div class="login-brand">
-        <div class="login-logo">
-          <svg viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <rect x="4" y="4" width="40" height="40" rx="10" fill="rgba(255,255,255,0.15)" />
-            <path d="M16 24l6 6 10-12" stroke="#fff" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round" />
-          </svg>
+        <div class="login-logo-text">
+          <span class="logo-thunder">Thunder</span><span class="logo-comm">comm</span>
         </div>
         <h1 class="login-title">SOP 防呆系统</h1>
         <p class="login-subtitle">智能作业防错 · AI 视觉引导</p>
@@ -89,7 +86,7 @@ async function handleLogin() {
         </el-form>
       </el-card>
 
-      <p class="login-footer">SOP Poka-Yoke v1.0.0</p>
+      <p class="login-footer">Thundercomm SOP Poka-Yoke v1.0.0</p>
     </div>
   </div>
 </template>
@@ -145,16 +142,22 @@ async function handleLogin() {
   margin-bottom: 32px;
 }
 
-.login-logo {
-  width: 64px;
-  height: 64px;
-  margin: 0 auto 16px;
+.login-logo-text {
+  font-size: 38px;
+  letter-spacing: 1px;
+  margin-bottom: 16px;
+  filter: drop-shadow(0 2px 8px rgba(227, 27, 35, 0.25));
 }
 
-.login-logo svg {
-  width: 100%;
-  height: 100%;
-  filter: drop-shadow(0 2px 8px rgba(64, 158, 255, 0.3));
+.logo-thunder {
+  font-weight: 700;
+  color: #e31b23;
+  font-style: italic;
+}
+
+.logo-comm {
+  font-weight: 400;
+  color: #e31b23;
 }
 
 .login-title {
