@@ -2,8 +2,10 @@
 import { ref } from "vue";
 import { useRouter } from "vue-router";
 import { ElMessage } from "element-plus";
+import axios from "axios";
 import api from "@/api/index";
 import { useAuthStore } from "@/stores/auth";
+import { parseErrorMsg } from "@/utils/httpError";
 
 const router = useRouter();
 const authStore = useAuthStore();
@@ -25,8 +27,12 @@ async function handleLogin() {
     authStore.setToken(data.access_token);
     ElMessage.success("登录成功");
     router.push("/");
-  } catch {
-    ElMessage.error("用户名或密码错误");
+  } catch (e) {
+    if (axios.isAxiosError(e) && !e.response) {
+      ElMessage.error("网络连接失败，请检查后端服务");
+    } else {
+      ElMessage.error(parseErrorMsg(e, "用户名或密码错误"));
+    }
   } finally {
     loading.value = false;
   }

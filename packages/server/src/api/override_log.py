@@ -73,7 +73,7 @@ async def create_override_log(
     db: AsyncSession = Depends(get_db),
     _: dict = Depends(require_admin),
 ):
-    """创建强制放行记录（仅管理员或边缘端服务账户可调用）。"""
+    """创建强制放行记录（仅管理员可调用）。"""
     wo = await db.execute(select(WorkOrder.id).where(WorkOrder.id == data.workorder_id))
     if wo.scalar_one_or_none() is None:
         raise HTTPException(status_code=404, detail="工单不存在")

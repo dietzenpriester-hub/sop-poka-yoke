@@ -18,7 +18,7 @@ async def list_stations(
     skip: int = Query(default=0, ge=0),
     limit: int = Query(default=50, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
-    user: dict = Depends(get_current_user),
+    _: dict = Depends(get_current_user),
 ):
     q = select(Station)
     if line_id:

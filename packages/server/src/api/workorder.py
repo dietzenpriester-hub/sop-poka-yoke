@@ -14,7 +14,7 @@ router = APIRouter()
 _svc = WorkOrderService()
 
 
-@router.get("/", response_model=list[WorkOrderResponse])
+@router.get("/")
 async def list_workorders(
     station_id: int | None = None,
     status: str | None = None,
@@ -26,7 +26,7 @@ async def list_workorders(
     db: AsyncSession = Depends(get_db),
     _: dict = Depends(get_current_user),
 ):
-    return await _svc.list_workorders(
+    items, total = await _svc.list_workorders(
         db,
         station_id=station_id,
         status=status,
@@ -36,6 +36,7 @@ async def list_workorders(
         skip=skip,
         limit=limit,
     )
+    return {"items": items, "total": total}
 
 
 @router.post("/", response_model=WorkOrderResponse, status_code=201)

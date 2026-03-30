@@ -17,7 +17,7 @@ class AlertBatchAck(BaseModel):
     alert_ids: list[int]
 
 
-@router.get("/", response_model=list[AlertResponse])
+@router.get("/")
 async def list_alerts(
     station_id: int | None = None,
     station_code: str | None = None,
@@ -27,22 +27,28 @@ async def list_alerts(
     skip: int = Query(default=0, ge=0),
     limit: int = Query(default=50, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
-    user: dict = Depends(get_current_user),
+    _: dict = Depends(get_current_user),
 ):
     """查询报警列表，支持工位、严重度、类型、确认状态筛选。"""
-    q = select(AlertEvent)
+    conditions = []
     if station_id is not None:
-        q = q.where(AlertEvent.station_id == station_id)
+        conditions.append(AlertEvent.station_id == station_id)
     if station_code:
-        q = q.where(AlertEvent.station_code == station_code)
+        conditions.append(AlertEvent.station_code == station_code)
     if severity:
-        q = q.where(AlertEvent.severity == severity)
+        conditions.append(AlertEvent.severity == severity)
     if alert_type:
-        q = q.where(AlertEvent.alert_type == alert_type)
+        conditions.append(AlertEvent.alert_type == alert_type)
     if acknowledged is not None:
-        q = q.where(AlertEvent.acknowledged == acknowledged)
+        conditions.append(AlertEvent.acknowledged == acknowledged)
+    q = select(AlertEvent)
+    count_q = select(func.count(AlertEvent.id))
+    if conditions:
+        q = q.where(*conditions)
+        count_q = count_q.where(*conditions)
+    total = (await db.execute(count_q)).scalar_one()
     result = await db.execute(q.order_by(AlertEvent.id.desc()).offset(skip).limit(limit))
-    return list(result.scalars().all())
+    return {"items": list(result.scalars().all()), "total": total}
 
 
 @router.get("/unacknowledged-count")

@@ -15,7 +15,10 @@ class KeyframeExtractor:
         self._prev_gray: np.ndarray | None = None
 
     def is_keyframe(self, frame: np.ndarray) -> bool:
-        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        if frame.ndim == 2 or (frame.ndim == 3 and frame.shape[2] == 1):
+            gray = frame if frame.ndim == 2 else frame[:, :, 0]
+        else:
+            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         gray = cv2.GaussianBlur(gray, (21, 21), 0)
 
         if self._prev_gray is not None:

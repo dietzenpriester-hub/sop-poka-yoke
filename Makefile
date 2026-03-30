@@ -39,6 +39,7 @@ codegen:
 
 # === 生产部署 ===
 prod-up:
+	@test -f .env || (echo "错误: 请先复制 .env.example 为 .env 并配置密钥" && exit 1)
 	docker compose up -d --build
 
 prod-down:

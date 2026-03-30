@@ -11,7 +11,12 @@ class VisualInspector:
         self.detector = yolo_detector
 
     def inspect(self, frame, reference_image_path: str, check_items: list[str]) -> dict:
-        ref_image = cv2.imread(reference_image_path)
+        from pathlib import Path
+        rp = Path(reference_image_path).resolve()
+        allowed_root = Path(__file__).resolve().parents[3] / "data"
+        if not str(rp).startswith(str(allowed_root)):
+            return {"result": "ERROR", "message": f"参考图路径不在允许目录内: {rp}"}
+        ref_image = cv2.imread(str(rp))
         if ref_image is None:
             return {"result": "ERROR", "message": "参考图加载失败"}
         detections = self.detector.detect(frame)

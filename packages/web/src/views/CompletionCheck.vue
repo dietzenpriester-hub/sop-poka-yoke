@@ -72,8 +72,8 @@ async function loadStats() {
       filters.value.workorder_id != null ? { workorder_id: filters.value.workorder_id } : undefined;
     const { data } = await completionCheckApi.stats(params);
     stats.value = data;
-  } catch {
-    ElMessage.warning("统计数据加载失败");
+  } catch (e: unknown) {
+    ElMessage.warning(parseErrorMsg(e, "统计数据加载失败"));
   }
 }
 

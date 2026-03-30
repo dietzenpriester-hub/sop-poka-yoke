@@ -6,6 +6,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from loguru import logger
 from sqlalchemy import text
+from sqlalchemy.exc import IntegrityError
 from starlette.responses import JSONResponse
 
 from src.api.router import api_router
@@ -22,6 +23,10 @@ async def lifespan(app: FastAPI):
     logger.info("SOP 服务端启动完成")
     yield
     stop_mqtt_consumer()
+    from src.services.ai.vlm_service import VLMService
+    for obj in list(globals().values()):
+        if isinstance(obj, VLMService):
+            await obj.close()
     logger.info("SOP 服务端正在关闭")
 
 
@@ -45,7 +50,16 @@ app.include_router(api_router, prefix="/api")
 @app.exception_handler(ValueError)
 async def value_error_handler(request: Request, exc: ValueError):
     logger.warning("请求参数错误: {}", exc)
-    return JSONResponse(status_code=400, content={"detail": "请求参数错误"})
+    return JSONResponse(status_code=400, content={"detail": str(exc) or "请求参数错误"})
+
+
+@app.exception_handler(IntegrityError)
+async def integrity_error_handler(request: Request, exc: IntegrityError):
+    logger.warning("数据库完整性错误: {}", exc.orig)
+    return JSONResponse(
+        status_code=409,
+        content={"detail": "数据完整性冲突（关联数据或唯一约束）"},
+    )
 
 
 @app.get("/health")

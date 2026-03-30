@@ -80,7 +80,7 @@ async function loadData() {
     const failed = results.filter((r) => r.status === "rejected").length;
     if (failed > 0) ElMessage.warning(`${failed} 个报表接口加载失败`);
   } finally {
-    loading.value = false;
+    if (seq === requestSeq) loading.value = false;
   }
 }
 

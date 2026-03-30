@@ -50,6 +50,8 @@ class MinIOUploader:
         p = Path(local_path)
         if not object_name:
             object_name = p.name
+        if ".." in object_name or object_name.startswith("/"):
+            raise ValueError(f"不安全的 object_name: {object_name}")
         content_type = "video/mp4" if p.suffix == ".mp4" else "image/jpeg"
         self.client.fput_object(self.bucket, object_name, str(p), content_type=content_type)
         url = f"{self.bucket}/{object_name}"

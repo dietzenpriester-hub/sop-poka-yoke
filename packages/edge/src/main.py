@@ -167,7 +167,6 @@ def main() -> None:
         BOMValidator(vlm, detector)  # 预留：物料校验等扩展
 
     stream.start()
-    alerter.connect()
     fsm.start("DEMO-SN-001")
 
     logger.info("═══ 开始实时检测循环 ═══")

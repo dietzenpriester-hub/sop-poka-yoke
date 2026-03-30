@@ -44,10 +44,14 @@ export function useStationWebSocket(
     const token = sessionStorage.getItem("sop_token");
     ws = new WebSocket(`${apiBaseWs}/api/ws/live/${encodeURIComponent(id)}`);
     ws.onopen = () => {
-      ready.value = true;
       retryCount = 0;
+      if (!token) {
+        ws?.close();
+        return;
+      }
       if (ws && ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({ token }));
+        ready.value = true;
       }
     };
     ws.onmessage = (event) => {

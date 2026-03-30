@@ -61,18 +61,21 @@ async def _handle_alert(station_id: str, payload: dict) -> None:
     except Exception as e:
         logger.error("报警入库失败: station={} error={}", station_id, e)
 
-    await broadcast_to_station(station_id, {
-        "type": "alert",
-        "persisted": persisted,
-        "alert": {
-            "id": alert_id,
-            "alert_type": payload.get("alert_code", "UNKNOWN"),
-            "severity": payload.get("severity", "WARN"),
-            "message": payload.get("message", ""),
-            "step_index": payload.get("step_index", 0),
-            "station_id": station_id,
-        },
-    })
+    if persisted:
+        await broadcast_to_station(station_id, {
+            "type": "alert",
+            "persisted": True,
+            "alert": {
+                "id": alert_id,
+                "alert_type": payload.get("alert_code", "UNKNOWN"),
+                "severity": payload.get("severity", "WARN"),
+                "message": payload.get("message", ""),
+                "step_index": payload.get("step_index", 0),
+                "station_id": station_id,
+            },
+        })
+    else:
+        logger.warning("报警未入库，跳过 WebSocket 广播: station={}", station_id)
 
 
 async def _dispatch_message(station_id: str, event_kind: str, payload: dict) -> None:

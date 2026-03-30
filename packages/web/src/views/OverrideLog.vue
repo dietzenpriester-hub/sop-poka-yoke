@@ -204,7 +204,12 @@ onMounted(() => {
       </el-table-column>
       <el-table-column label="视频" width="100">
         <template #default="{ row }">
-          <el-link v-if="row.video_url" :href="row.video_url" target="_blank" type="primary">查看</el-link>
+          <el-link
+            v-if="row.video_url && (row.video_url.startsWith('http://') || row.video_url.startsWith('https://'))"
+            :href="row.video_url"
+            target="_blank"
+            type="primary"
+          >查看</el-link>
           <span v-else style="color: #c0c4cc">—</span>
         </template>
       </el-table-column>

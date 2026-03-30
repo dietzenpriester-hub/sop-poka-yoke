@@ -2,7 +2,7 @@
 
 from datetime import date, datetime, time, timedelta, timezone
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.models.workorder import StepRecord, WorkOrder
@@ -22,26 +22,33 @@ class WorkOrderService:
         end_date: date | None = None,
         skip: int = 0,
         limit: int = 50,
-    ) -> list[WorkOrder]:
+    ) -> tuple[list[WorkOrder], int]:
         q = select(WorkOrder)
+        conditions = []
         if station_id is not None:
-            q = q.where(WorkOrder.station_id == station_id)
+            conditions.append(WorkOrder.station_id == station_id)
         if status:
-            q = q.where(WorkOrder.status == status)
+            conditions.append(WorkOrder.status == status)
         if sn:
-            q = q.where(WorkOrder.sn.icontains(sn))
+            conditions.append(WorkOrder.sn.icontains(sn))
         if start_date is not None:
             start_dt = datetime.combine(start_date, time.min, tzinfo=timezone.utc)
-            q = q.where(WorkOrder.start_time >= start_dt)
+            conditions.append(WorkOrder.start_time >= start_dt)
         if end_date is not None:
             end_exclusive = datetime.combine(
                 end_date + timedelta(days=1), time.min, tzinfo=timezone.utc
             )
-            q = q.where(WorkOrder.start_time < end_exclusive)
+            conditions.append(WorkOrder.start_time < end_exclusive)
+        if conditions:
+            q = q.where(*conditions)
+        count_q = select(func.count(WorkOrder.id))
+        if conditions:
+            count_q = count_q.where(*conditions)
+        total = (await db.execute(count_q)).scalar_one()
         result = await db.execute(
             q.order_by(WorkOrder.id.desc()).offset(skip).limit(limit)
         )
-        return list(result.scalars().all())
+        return list(result.scalars().all()), total
 
     @staticmethod
     async def get_by_id(db: AsyncSession, workorder_id: int) -> WorkOrder | None:
@@ -69,6 +76,27 @@ class WorkOrderService:
 
     @staticmethod
     async def delete(db: AsyncSession, wo: WorkOrder) -> None:
+        from sqlalchemy import func as sqlfunc
+
+        from src.models.alert import AlertEvent
+        from src.models.completion_check import CompletionCheck
+        from src.models.material_check import MaterialCheck
+        from src.models.override_log import OverrideLog
+
+        wo_id = wo.id
+        for model, label in [
+            (AlertEvent, "报警"),
+            (MaterialCheck, "物料校验"),
+            (CompletionCheck, "完工检验"),
+            (OverrideLog, "强制放行"),
+        ]:
+            cnt = (await db.execute(
+                select(sqlfunc.count(model.id)).where(model.workorder_id == wo_id)
+            )).scalar_one()
+            if cnt > 0:
+                raise ValueError(
+                    f"工单存在关联{label}记录（{cnt} 条），请先处理关联数据再删除"
+                )
         await db.delete(wo)
         await db.commit()
 

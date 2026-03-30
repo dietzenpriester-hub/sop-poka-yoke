@@ -84,7 +84,7 @@ if check_port 9000; then
     echo -e "  ${GREEN}✓${NC} MinIO 已在运行 (端口 9000)"
 else
     echo -e "  启动 MinIO..."
-    MINIO_ROOT_USER=minioadmin MINIO_ROOT_PASSWORD="${MINIO_ROOT_PASSWORD:-changeme}" \
+    MINIO_ROOT_USER=minioadmin MINIO_ROOT_PASSWORD="${MINIO_PASSWORD:-${MINIO_ROOT_PASSWORD:-changeme}}" \
         minio server "$MINIO_DATA" --console-address ":9001" \
         >"$LOG_DIR/minio.log" 2>&1 &
     wait_for_port 9000 "MinIO"

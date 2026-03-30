@@ -22,8 +22,14 @@ class TabletWebSocketServer:
     async def handler(self, request: aiohttp.web.Request) -> aiohttp.web.WebSocketResponse:
         ws = aiohttp.web.WebSocketResponse()
         await ws.prepare(request)
-        # 若设置 SOP_WS_TOKEN，首条消息须为 {"token": "<token>"}；未设置则跳过校验（开发模式）
         expected = os.environ.get("SOP_WS_TOKEN")
+        if not expected:
+            is_prod = os.environ.get("SOP_ENV", "").lower() == "production"
+            if is_prod:
+                logger.error("生产环境未设置 SOP_WS_TOKEN，拒绝 WebSocket 连接")
+                await ws.close()
+                return ws
+            logger.warning("SOP_WS_TOKEN 未设置，跳过认证（仅限开发环境）")
         if expected:
             try:
                 msg = await ws.receive()

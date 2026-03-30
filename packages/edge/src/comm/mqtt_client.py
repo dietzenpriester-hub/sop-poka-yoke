@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import json
+import os
 from typing import Any, Callable
 
 import paho.mqtt.client as mqtt
 from loguru import logger
+
+MAX_PAYLOAD_BYTES = 1024 * 1024  # 1 MB
 
 
 class MQTTClient:
@@ -20,9 +23,16 @@ class MQTTClient:
         self._handlers: dict[str, Callable] = {}
 
     def connect(self) -> None:
+        username = os.environ.get("SOP_MQTT_USERNAME", "")
+        password = os.environ.get("SOP_MQTT_PASSWORD", "")
+        if username:
+            self._client.username_pw_set(username, password)
+        use_tls = os.environ.get("SOP_MQTT_TLS", "0") == "1"
+        if use_tls:
+            self._client.tls_set()
         self._client.connect(self.broker, self.port, 60)
         self._client.loop_start()
-        logger.info("MQTT 已连接: {}:{}", self.broker, self.port)
+        logger.info("MQTT 已连接: {}:{} (TLS={})", self.broker, self.port, use_tls)
 
     def publish(self, topic: str, payload: dict[str, Any]) -> None:
         info = self._client.publish(topic, json.dumps(payload, ensure_ascii=False))
@@ -46,6 +56,9 @@ class MQTTClient:
             logger.error("MQTT 连接失败: {}", reason_code)
 
     def _on_message(self, client, userdata, msg) -> None:
+        if len(msg.payload) > MAX_PAYLOAD_BYTES:
+            logger.warning("MQTT 消息过大 ({}B)，已丢弃: topic={}", len(msg.payload), msg.topic)
+            return
         try:
             payload = json.loads(msg.payload.decode("utf-8"))
         except json.JSONDecodeError:

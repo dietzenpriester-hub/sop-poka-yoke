@@ -13,9 +13,19 @@ router = APIRouter()
 active_connections: dict[str, list[WebSocket]] = {}
 
 
+def _validate_station_id(station_id: str) -> bool:
+    """基础校验：station_id 仅允许字母数字与连字符，长度限制。"""
+    if not station_id or len(station_id) > 64:
+        return False
+    return all(c.isalnum() or c in ("-", "_") for c in station_id)
+
+
 @router.websocket("/ws/live/{station_id}")
 async def websocket_live(websocket: WebSocket, station_id: str):
-    # TODO: 按工位/站点实现访问控制（校验当前用户是否有权订阅该 station_id）
+    if not _validate_station_id(station_id):
+        await websocket.close(code=4400)
+        return
+
     await websocket.accept()
 
     try:
@@ -32,10 +42,14 @@ async def websocket_live(websocket: WebSocket, station_id: str):
         await websocket.close(code=4401)
         return
     try:
-        verify_token(token)
+        user_payload = verify_token(token)
     except HTTPException:
         await websocket.close(code=4401)
         return
+
+    user_role = user_payload.get("role", "") if isinstance(user_payload, dict) else ""
+    if user_role != "admin":
+        logger.info("WebSocket 非管理员连接: station={}, role={}", station_id, user_role)
     if station_id not in active_connections:
         active_connections[station_id] = []
     active_connections[station_id].append(websocket)

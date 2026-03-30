@@ -50,11 +50,17 @@ const allMenuItems: MenuItem[] = [
   { path: "/lifecycle", label: "数据管理", icon: Delete, meta: { requiresAdmin: true } },
 ];
 
+function base64UrlDecode(str: string): string {
+  let b = str.replace(/-/g, "+").replace(/_/g, "/");
+  while (b.length % 4) b += "=";
+  return atob(b);
+}
+
 function jwtRole(): string | null {
   const token = sessionStorage.getItem("sop_token");
   if (!token) return null;
   try {
-    const payload = JSON.parse(atob(token.split(".")[1])) as { role?: string };
+    const payload = JSON.parse(base64UrlDecode(token.split(".")[1])) as { role?: string };
     return typeof payload.role === "string" ? payload.role : null;
   } catch {
     return null;
@@ -134,7 +140,7 @@ onUnmounted(() => {
               <el-icon :size="20"><Bell /></el-icon>
             </el-button>
           </el-badge>
-          <span style="color: #999; font-size: 14px">SOP 防呆系统 v2.0</span>
+          <span style="color: #999; font-size: 14px">SOP 防呆系统 v1.0.0</span>
           <el-button text type="danger" size="small" @click="handleLogout">退出</el-button>
         </div>
       </el-header>

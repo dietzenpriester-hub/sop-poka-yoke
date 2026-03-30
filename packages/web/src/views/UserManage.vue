@@ -24,8 +24,8 @@ async function loadUsers() {
     if (roleFilter.value) params.role = roleFilter.value;
     const { data } = await userApi.list(params as Parameters<typeof userApi.list>[0]);
     users.value = data;
-  } catch {
-    ElMessage.error("加载用户列表失败");
+  } catch (e: unknown) {
+    ElMessage.error(parseErrorMsg(e, "加载用户列表失败"));
   } finally {
     loading.value = false;
   }

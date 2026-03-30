@@ -22,7 +22,7 @@ async def list_sop_templates(
     return await _svc.list_templates(db, skip=skip, limit=limit)
 
 
-@router.post("/", response_model=SOPResponse)
+@router.post("/", response_model=SOPResponse, status_code=201)
 async def create_sop_template(
     data: SOPCreate,
     db: AsyncSession = Depends(get_db),

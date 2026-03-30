@@ -63,7 +63,10 @@ class LearningService:
             logger.warning("分析任务 {} 已被删除，跳过", task_id)
             return
 
+        _last_commit_progress = 0.0
+
         async def progress_callback(progress: float, phase_name: str, detail: dict[str, Any]):
+            nonlocal _last_commit_progress
             task.progress = progress
             task.analysis_detail = {**(task.analysis_detail or {}), **detail, "phase": phase_name}
             if progress < 0.25:
@@ -74,7 +77,9 @@ class LearningService:
                 task.status = "phase_3"
             elif progress < 1.0:
                 task.status = "phase_4"
-            await db.commit()
+            if progress - _last_commit_progress >= 0.05 or progress >= 1.0:
+                _last_commit_progress = progress
+                await db.commit()
 
         steps = await self.pipeline.run(
             video_minio_path=task.video_path,
@@ -144,12 +149,12 @@ class LearningService:
             description=f"AI 自动分析生成（任务 {task_id[:8]}...）",
         )
         db.add(template)
-        await db.commit()
-        await db.refresh(template)
+        await db.flush()
 
         task.status = "confirmed"
         task.template_id = template.id
         await db.commit()
+        await db.refresh(template)
 
         return {"template_id": template.id, "name": template.name, "step_count": len(task.steps or [])}
 
@@ -158,5 +163,16 @@ class LearningService:
         task = result.scalar_one_or_none()
         if not task:
             raise ValueError("任务不存在")
+        video_path = task.video_path
         await db.delete(task)
         await db.commit()
+        if video_path:
+            try:
+                from src.services.storage_service import get_storage_service, resolve_minio_bucket_and_object
+                from src.core.config import settings as _s
+                storage = get_storage_service()
+                bucket, key = resolve_minio_bucket_and_object(video_path, _s.MINIO_BUCKET_VIDEOS)
+                storage.client.remove_object(bucket, key)
+                logger.info("已清理学习任务视频: {}", video_path)
+            except Exception as e:
+                logger.warning("清理学习任务视频失败（可忽略）: {}", e)

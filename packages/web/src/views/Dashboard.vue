@@ -124,7 +124,7 @@ async function loadDashboard() {
       ElMessage.warning(`部分仪表盘数据加载失败（${failed}/4）`);
     }
   } finally {
-    loading.value = false;
+    if (seq === requestSeq) loading.value = false;
   }
 }
 

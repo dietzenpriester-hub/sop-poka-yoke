@@ -37,3 +37,11 @@ class ActionEmbeddingComparator:
         else:
             status = "NG"
         return {"similarity": similarity, "status": status}
+
+    def clear(self, step_index: int | None = None) -> None:
+        """清除参考 embedding。step_index=None 清除所有。"""
+        with self._reference_lock:
+            if step_index is None:
+                self.reference_embeddings.clear()
+            else:
+                self.reference_embeddings.pop(step_index, None)

@@ -14,7 +14,10 @@ class SOPTemplateLoader:
         self._templates: dict[str, dict] = {}
 
     def load_from_file(self, path: str | Path) -> dict:
-        p = Path(path)
+        p = Path(path).resolve()
+        repo_root = Path(__file__).resolve().parents[3]
+        if not str(p).startswith(str(repo_root)):
+            raise ValueError(f"SOP 模板路径不在允许目录内: {p}")
         try:
             with open(p, "r", encoding="utf-8") as f:
                 template = json.load(f)

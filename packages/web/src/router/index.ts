@@ -1,8 +1,14 @@
 import { createRouter, createWebHistory } from "vue-router";
 
+function base64UrlDecode(str: string): string {
+  let base64 = str.replace(/-/g, "+").replace(/_/g, "/");
+  while (base64.length % 4) base64 += "=";
+  return atob(base64);
+}
+
 function parseJwtPayload(token: string): Record<string, unknown> | null {
   try {
-    return JSON.parse(atob(token.split(".")[1]));
+    return JSON.parse(base64UrlDecode(token.split(".")[1]));
   } catch {
     return null;
   }
