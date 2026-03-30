@@ -10,9 +10,10 @@
 6. [Step 2：边缘设备部署](#6-step-2边缘设备部署)
 7. [Step 3：安全加固](#7-step-3安全加固)
 8. [Step 4：初始化与验证](#8-step-4初始化与验证)
-9. [日常运维](#9-日常运维)
-10. [故障排查](#10-故障排查)
-11. [升级流程](#11-升级流程)
+9. [远程访问配置](#9-远程访问配置)
+10. [日常运维](#10-日常运维)
+11. [故障排查](#11-故障排查)
+12. [升级流程](#12-升级流程)
 
 ---
 
@@ -478,7 +479,112 @@ curl -X POST http://localhost:8000/api/auth/register \
 
 ---
 
-## 9. 日常运维
+## 9. 远程访问配置
+
+### 9.1 内网访问（宿主机 Nginx 反向代理）
+
+Docker 内所有端口绑定在 `127.0.0.1`，外部无法直接访问。
+通过宿主机 Nginx 反向代理，让局域网内其他设备可以访问系统。
+
+**安装并配置：**
+
+```bash
+# 1. 安装 Nginx
+sudo apt install -y nginx
+
+# 2. 部署配置文件
+sudo cp deploy/nginx-host.conf /etc/nginx/sites-available/sop
+sudo ln -s /etc/nginx/sites-available/sop /etc/nginx/sites-enabled/
+sudo rm -f /etc/nginx/sites-enabled/default  # 移除默认站点
+
+# 3. 测试并重载
+sudo nginx -t
+sudo systemctl reload nginx
+```
+
+配置完成后，局域网内其他设备通过 `http://<服务器IP>` 即可访问系统。
+
+**可选：HTTPS 支持**
+
+`deploy/nginx-host.conf` 中有完整的 HTTPS 配置（已注释），取消注释并提供证书即可启用。
+
+内网自签证书：
+```bash
+sudo openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+  -keyout /etc/ssl/sop.key -out /etc/ssl/sop.crt \
+  -subj "/CN=sop.thundercomm.local"
+```
+
+### 9.2 外网远程访问（Cloudflare Tunnel）
+
+Cloudflare Tunnel 可以在不暴露公网 IP 的情况下，安全地让外网用户访问系统。
+
+**前置条件：**
+- Cloudflare 账号（免费）
+- 一个域名（已托管在 Cloudflare DNS）
+
+**安装步骤：**
+
+```bash
+# 1. 安装 cloudflared
+curl -L --output cloudflared.deb \
+  https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
+sudo dpkg -i cloudflared.deb
+
+# 2. 登录 Cloudflare
+cloudflared tunnel login
+# 浏览器打开链接完成授权
+
+# 3. 创建隧道
+cloudflared tunnel create sop-poka-yoke
+# 记录输出的 Tunnel ID
+
+# 4. 配置隧道
+cat > ~/.cloudflared/config.yml << EOF
+tunnel: <Tunnel-ID>
+credentials-file: /root/.cloudflared/<Tunnel-ID>.json
+
+ingress:
+  - hostname: sop.your-domain.com
+    service: http://127.0.0.1:8080
+  - hostname: sop.your-domain.com
+    path: /api/ws/
+    service: http://127.0.0.1:8080
+    originRequest:
+      httpHostHeader: sop.your-domain.com
+  - service: http_status:404
+EOF
+
+# 5. 配置 DNS
+cloudflared tunnel route dns sop-poka-yoke sop.your-domain.com
+
+# 6. 运行隧道
+cloudflared tunnel run sop-poka-yoke
+```
+
+**设为系统服务（自动启动）：**
+
+```bash
+sudo cloudflared service install
+sudo systemctl enable cloudflared
+sudo systemctl start cloudflared
+```
+
+配置完成后，外网用户通过 `https://sop.your-domain.com` 即可安全访问系统。
+Cloudflare 自动提供 HTTPS 证书，无需手动配置 TLS。
+
+### 9.3 访问方案对比
+
+| 方案 | 适用场景 | 安全性 | 是否需要公网 IP |
+|------|---------|--------|---------------|
+| 宿主机 Nginx | 局域网内操作员/管理员 | 中 | 不需要 |
+| Cloudflare Tunnel | 远程管理员/技术支持 | 高 | 不需要 |
+| VPN (WireGuard) | 远程团队常驻使用 | 最高 | 需要 |
+| 公网直连 | 不推荐 | 低 | 需要 |
+
+---
+
+## 10. 日常运维
 
 ### 9.1 查看日志
 
@@ -530,7 +636,7 @@ Grafana 推荐监控面板：
 
 ---
 
-## 10. 故障排查
+## 11. 故障排查
 
 ### 10.1 常见问题
 
@@ -567,7 +673,7 @@ curl http://localhost:8000/api/health
 
 ---
 
-## 11. 升级流程
+## 12. 升级流程
 
 ### 11.1 标准升级
 
