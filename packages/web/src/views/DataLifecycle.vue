@@ -8,11 +8,7 @@ import {
   type RetentionPolicy,
   type CleanupLog,
 } from "@/api/lifecycle";
-
-function parseErrorMsg(e: unknown, fallback: string): string {
-  const resp = (e as { response?: { data?: { detail?: string } } })?.response;
-  return resp?.data?.detail || fallback;
-}
+import { parseErrorMsg } from "@/utils/httpError";
 
 const loading = ref(false);
 const stats = ref<StorageStats | null>(null);

@@ -8,7 +8,7 @@ class UserCreate(BaseModel):
     display_name: str = ""
     role: str = Field(default="operator", pattern="^(admin|supervisor|operator)$")
     badge_id: str = ""
-    password: str = Field(..., min_length=4, max_length=128)
+    password: str = Field(..., min_length=8, max_length=128)
 
 
 class UserUpdate(BaseModel):
@@ -18,7 +18,7 @@ class UserUpdate(BaseModel):
 
 
 class UserPasswordChange(BaseModel):
-    new_password: str = Field(..., min_length=4, max_length=128)
+    new_password: str = Field(..., min_length=8, max_length=128)
 
 
 class UserResponse(BaseModel):

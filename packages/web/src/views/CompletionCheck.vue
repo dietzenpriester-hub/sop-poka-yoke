@@ -2,13 +2,7 @@
 import { ref, onMounted } from "vue";
 import { ElMessage } from "element-plus";
 import { completionCheckApi, type CompletionCheckItem, type CompletionCheckStats } from "@/api/completionCheck";
-
-function parseErrorMsg(e: unknown, fallback: string): string {
-  const resp = (e as { response?: { data?: { detail?: string | unknown } } })?.response;
-  const d = resp?.data?.detail;
-  if (typeof d === "string") return d;
-  return fallback;
-}
+import { parseErrorMsg } from "@/utils/httpError";
 
 const rows = ref<CompletionCheckItem[]>([]);
 const total = ref(0);

@@ -4,13 +4,7 @@ import { ElMessage, ElMessageBox } from "element-plus";
 import { workorderApi, type WorkOrderItem, type StepRecordItem } from "@/api/workorder";
 import { stationApi, type StationItem } from "@/api/station";
 import { sopApi, type SOPTemplate } from "@/api/sop";
-
-function parseErrorMsg(e: unknown, fallback: string): string {
-  const resp = (e as { response?: { data?: { detail?: string | unknown } } })?.response;
-  const d = resp?.data?.detail;
-  if (typeof d === "string") return d;
-  return fallback;
-}
+import { parseErrorMsg } from "@/utils/httpError";
 
 const workorders = ref<WorkOrderItem[]>([]);
 const loading = ref(false);

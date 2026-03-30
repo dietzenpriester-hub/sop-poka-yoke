@@ -1,7 +1,7 @@
 """全局常量"""
 
 APP_NAME: str = "sop-poka-yoke"
-APP_VERSION: str = "1.0.0"
+APP_VERSION: str = "1.0.0"  # 与 packages/server/src/main.py FastAPI(version=...) 保持一致
 
 CONFIDENCE_OK_THRESHOLD: float = 0.85
 CONFIDENCE_WARN_THRESHOLD: float = 0.60

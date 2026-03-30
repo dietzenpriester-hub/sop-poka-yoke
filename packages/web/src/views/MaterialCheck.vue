@@ -2,13 +2,7 @@
 import { ref, onMounted } from "vue";
 import { ElMessage } from "element-plus";
 import { materialCheckApi, type MaterialCheckItem, type MaterialCheckStats } from "@/api/materialCheck";
-
-function parseErrorMsg(e: unknown, fallback: string): string {
-  const resp = (e as { response?: { data?: { detail?: string | unknown } } })?.response;
-  const d = resp?.data?.detail;
-  if (typeof d === "string") return d;
-  return fallback;
-}
+import { parseErrorMsg } from "@/utils/httpError";
 
 const rows = ref<MaterialCheckItem[]>([]);
 const total = ref(0);

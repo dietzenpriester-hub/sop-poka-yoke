@@ -3,6 +3,7 @@ import { ref, computed, onMounted } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { ArrowDown, ArrowUp } from "@element-plus/icons-vue";
 import { sopApi, type SOPTemplate } from "@/api/sop";
+import { parseErrorMsg } from "@/utils/httpError";
 
 interface SOPStep {
   /** 仅用于列表渲染，不提交到 API */
@@ -23,11 +24,6 @@ const ACTION_TYPE_OPTIONS = [
   "测量",
   "其他",
 ] as const;
-
-function parseErrorMsg(e: unknown, fallback: string): string {
-  const resp = (e as { response?: { data?: { detail?: string } } })?.response;
-  return resp?.data?.detail || fallback;
-}
 
 function normalizeStep(raw: Record<string, unknown>): SOPStep {
   const name = typeof raw.name === "string" ? raw.name : "";

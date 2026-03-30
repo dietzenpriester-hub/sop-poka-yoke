@@ -2,11 +2,7 @@
 import { ref, onMounted } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { userApi, type UserItem } from "@/api/user";
-
-function parseErrorMsg(e: unknown, fallback: string): string {
-  const resp = (e as { response?: { data?: { detail?: string } } })?.response;
-  return resp?.data?.detail || fallback;
-}
+import { parseErrorMsg } from "@/utils/httpError";
 
 const users = ref<UserItem[]>([]);
 const loading = ref(false);

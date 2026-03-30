@@ -2,11 +2,7 @@
 import { ref, computed, watch, onMounted, onUnmounted } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { learningApi, type LearningTask, type LearningStep } from "@/api/learning";
-
-function parseErrorMsg(e: unknown, fallback: string): string {
-  const resp = (e as { response?: { data?: { detail?: string } } })?.response;
-  return resp?.data?.detail || fallback;
-}
+import { parseErrorMsg } from "@/utils/httpError";
 
 function formatDateTime(iso: string | null | undefined): string {
   if (!iso) return "—";

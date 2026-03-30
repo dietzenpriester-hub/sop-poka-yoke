@@ -24,35 +24,37 @@ class MQTTTopics:
     DETECTION = "sop/{station_id}/detection"
 
     @staticmethod
+    def _topic(template: str, station_id: str) -> str:
+        return template.format(station_id=MQTTTopics.validate_station_id(station_id))
+
+    @staticmethod
     def step_complete(station_id: str) -> str:
-        return MQTTTopics.STEP_COMPLETE.format(station_id=station_id)
+        return MQTTTopics._topic(MQTTTopics.STEP_COMPLETE, station_id)
 
     @staticmethod
     def alert_raise(station_id: str) -> str:
-        return MQTTTopics.ALERT_RAISE.format(station_id=station_id)
+        return MQTTTopics._topic(MQTTTopics.ALERT_RAISE, station_id)
 
     @staticmethod
     def workorder_start(station_id: str) -> str:
-        return MQTTTopics.WORKORDER_START.format(station_id=station_id)
+        return MQTTTopics._topic(MQTTTopics.WORKORDER_START, station_id)
 
     @staticmethod
     def workorder_done(station_id: str) -> str:
-        return MQTTTopics.WORKORDER_DONE.format(station_id=station_id)
+        return MQTTTopics._topic(MQTTTopics.WORKORDER_DONE, station_id)
 
     @staticmethod
     def override(station_id: str) -> str:
-        return MQTTTopics.OVERRIDE.format(station_id=station_id)
+        return MQTTTopics._topic(MQTTTopics.OVERRIDE, station_id)
 
     @staticmethod
     def heartbeat(station_id: str) -> str:
-        return MQTTTopics.HEARTBEAT.format(station_id=station_id)
+        return MQTTTopics._topic(MQTTTopics.HEARTBEAT, station_id)
 
     @staticmethod
     def sync_queue(station_id: str) -> str:
-        return MQTTTopics.SYNC_QUEUE.format(station_id=station_id)
+        return MQTTTopics._topic(MQTTTopics.SYNC_QUEUE, station_id)
 
     @staticmethod
     def detection(station_id: str) -> str:
-        return MQTTTopics.DETECTION.format(
-            station_id=MQTTTopics.validate_station_id(station_id)
-        )
+        return MQTTTopics._topic(MQTTTopics.DETECTION, station_id)

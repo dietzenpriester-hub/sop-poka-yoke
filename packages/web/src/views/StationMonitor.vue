@@ -2,11 +2,7 @@
 import { ref, onMounted } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { stationApi, type StationItem, type StationStats } from "@/api/station";
-
-function parseErrorMsg(e: unknown, fallback: string): string {
-  const resp = (e as { response?: { data?: { detail?: string } } })?.response;
-  return resp?.data?.detail || fallback;
-}
+import { parseErrorMsg } from "@/utils/httpError";
 
 const stations = ref<StationItem[]>([]);
 const loading = ref(false);

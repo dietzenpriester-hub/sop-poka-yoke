@@ -3,13 +3,7 @@ import { ref, onMounted, watch, nextTick } from "vue";
 import { ElMessage } from "element-plus";
 import { useECharts } from "@/composables/useECharts";
 import { overrideLogApi, type OverrideLogItem, type OverrideStats } from "@/api/overrideLog";
-
-function parseErrorMsg(e: unknown, fallback: string): string {
-  const resp = (e as { response?: { data?: { detail?: string | unknown } } })?.response;
-  const d = resp?.data?.detail;
-  if (typeof d === "string") return d;
-  return fallback;
-}
+import { parseErrorMsg } from "@/utils/httpError";
 
 const stats = ref<OverrideStats | null>(null);
 const statsLoading = ref(false);

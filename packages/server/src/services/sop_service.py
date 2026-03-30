@@ -19,7 +19,7 @@ class SOPService:
     ) -> list[SOPTemplate]:
         q = select(SOPTemplate)
         if active_only:
-            q = q.where(SOPTemplate.is_active == True)  # noqa: E712
+            q = q.where(SOPTemplate.is_active.is_(True))
         result = await db.execute(q.offset(skip).limit(limit))
         return list(result.scalars().all())
 

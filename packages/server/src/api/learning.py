@@ -27,8 +27,8 @@ _service = LearningService()
 
 @router.post("/upload-video", response_model=TaskCreateResponse)
 async def upload_standard_video(
-    product_model: str,
-    process_name: str,
+    product_model: str = Query(..., max_length=100, pattern=r"^[\w\-\u4e00-\u9fff]+$"),
+    process_name: str = Query(..., max_length=100, pattern=r"^[\w\-\u4e00-\u9fff]+$"),
     video: UploadFile = File(...),
     db: AsyncSession = Depends(get_db),
     _: dict = Depends(get_current_user),

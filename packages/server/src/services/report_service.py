@@ -91,9 +91,9 @@ class ReportService:
         for row in result:
             day_str = str(row.day)
             if day_str not in day_data:
-                day_data[day_str] = {"OK": 0, "NG": 0, "SKIP": 0, "OVERRIDE": 0}
-            if row.result in day_data[day_str]:
-                day_data[day_str][row.result] = row.count
+                day_data[day_str] = {"OK": 0, "NG": 0, "SKIP": 0, "OVERRIDE": 0, "other": 0}
+            key = row.result if row.result in ("OK", "NG", "SKIP", "OVERRIDE") else "other"
+            day_data[day_str][key] = day_data[day_str].get(key, 0) + row.count
 
         dates = sorted(day_data.keys())
         return {
