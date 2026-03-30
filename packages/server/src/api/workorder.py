@@ -1,17 +1,17 @@
-"""工单管理"""
+"""工单管理 — 路由层仅做参数校验与响应包装，业务逻辑委托 WorkOrderService。"""
 
-from datetime import date, datetime, time, timedelta, timezone
+from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.database import get_db
 from src.core.security import get_current_user, require_admin
-from src.models.workorder import StepRecord, WorkOrder
 from src.schemas.workorder import StepRecordResponse, WorkOrderCreate, WorkOrderResponse
+from src.services.workorder_service import WorkOrderService
 
 router = APIRouter()
+_svc = WorkOrderService()
 
 
 @router.get("/", response_model=list[WorkOrderResponse])
@@ -26,34 +26,25 @@ async def list_workorders(
     db: AsyncSession = Depends(get_db),
     _: dict = Depends(get_current_user),
 ):
-    q = select(WorkOrder)
-    if station_id is not None:
-        q = q.where(WorkOrder.station_id == station_id)
-    if status:
-        q = q.where(WorkOrder.status == status)
-    if sn:
-        q = q.where(WorkOrder.sn.icontains(sn))
-    if start_date is not None:
-        start_dt = datetime.combine(start_date, time.min, tzinfo=timezone.utc)
-        q = q.where(WorkOrder.start_time >= start_dt)
-    if end_date is not None:
-        end_exclusive = datetime.combine(end_date + timedelta(days=1), time.min, tzinfo=timezone.utc)
-        q = q.where(WorkOrder.start_time < end_exclusive)
-    result = await db.execute(q.order_by(WorkOrder.id.desc()).offset(skip).limit(limit))
-    return list(result.scalars().all())
+    return await _svc.list_workorders(
+        db,
+        station_id=station_id,
+        status=status,
+        sn=sn,
+        start_date=start_date,
+        end_date=end_date,
+        skip=skip,
+        limit=limit,
+    )
 
 
 @router.post("/", response_model=WorkOrderResponse, status_code=201)
 async def start_workorder(
     data: WorkOrderCreate,
     db: AsyncSession = Depends(get_db),
-    user: dict = Depends(get_current_user),
+    _user: dict = Depends(get_current_user),
 ):
-    wo = WorkOrder(**data.model_dump())
-    db.add(wo)
-    await db.commit()
-    await db.refresh(wo)
-    return wo
+    return await _svc.create(db, data)
 
 
 @router.get("/{workorder_id}", response_model=WorkOrderResponse)
@@ -62,8 +53,7 @@ async def get_workorder(
     db: AsyncSession = Depends(get_db),
     _: dict = Depends(get_current_user),
 ):
-    result = await db.execute(select(WorkOrder).where(WorkOrder.id == workorder_id))
-    wo = result.scalar_one_or_none()
+    wo = await _svc.get_by_id(db, workorder_id)
     if not wo:
         raise HTTPException(status_code=404, detail="工单不存在")
     return wo
@@ -73,17 +63,14 @@ async def get_workorder(
 async def complete_workorder(
     workorder_id: int,
     db: AsyncSession = Depends(get_db),
-    user: dict = Depends(get_current_user),
+    _user: dict = Depends(get_current_user),
 ):
-    result = await db.execute(select(WorkOrder).where(WorkOrder.id == workorder_id))
-    wo = result.scalar_one_or_none()
+    wo = await _svc.get_by_id(db, workorder_id)
     if not wo:
         raise HTTPException(status_code=404, detail="工单不存在")
     if wo.status == "done":
         raise HTTPException(status_code=400, detail="工单已完成")
-    wo.status = "done"
-    wo.end_time = datetime.now(timezone.utc)
-    await db.commit()
+    await _svc.complete(db, wo)
     return {"message": "工单已完成"}
 
 
@@ -93,27 +80,20 @@ async def get_workorder_steps(
     db: AsyncSession = Depends(get_db),
     _: dict = Depends(get_current_user),
 ):
-    wo_check = await db.execute(select(WorkOrder.id).where(WorkOrder.id == workorder_id))
-    if not wo_check.scalar_one_or_none():
+    wo = await _svc.get_by_id(db, workorder_id)
+    if not wo:
         raise HTTPException(status_code=404, detail="工单不存在")
-    result = await db.execute(
-        select(StepRecord)
-        .where(StepRecord.workorder_id == workorder_id)
-        .order_by(StepRecord.step_index)
-    )
-    return list(result.scalars().all())
+    return await _svc.get_step_records(db, workorder_id)
 
 
 @router.delete("/{workorder_id}")
 async def delete_workorder(
     workorder_id: int,
     db: AsyncSession = Depends(get_db),
-    admin: dict = Depends(require_admin),
+    _admin: dict = Depends(require_admin),
 ):
-    result = await db.execute(select(WorkOrder).where(WorkOrder.id == workorder_id))
-    wo = result.scalar_one_or_none()
+    wo = await _svc.get_by_id(db, workorder_id)
     if not wo:
         raise HTTPException(status_code=404, detail="工单不存在")
-    await db.delete(wo)
-    await db.commit()
+    await _svc.delete(db, wo)
     return {"message": "工单已删除"}
