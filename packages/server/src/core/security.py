@@ -33,10 +33,11 @@ def create_access_token(user_id: int, role: str, expires_delta: timedelta | None
 def verify_token(token: str) -> dict:
     """校验 token 并返回 {"user_id": int, "role": str}。DEV_MODE 下可接受 dev-token。"""
     settings = get_settings()
-    if settings.DEV_MODE and os.environ.get("SOP_ENV") == "production":
+    is_production = os.environ.get("SOP_ENV", "").lower() == "production"
+    if is_production and settings.DEV_MODE:
         logger.warning("DEV_MODE 与 SOP_ENV=production 同时设置，已忽略 DEV_MODE（按生产校验 JWT）")
-    elif settings.DEV_MODE and token == _DEV_TOKEN:
-        logger.debug("DEV_MODE: 接受 dev-token")
+    elif settings.DEV_MODE and not is_production and token == _DEV_TOKEN:
+        logger.debug("DEV_MODE: 接受 dev-token（仅限非生产环境）")
         return {"user_id": 1, "role": "admin"}
     try:
         payload = jwt.decode(

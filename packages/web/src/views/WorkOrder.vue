@@ -25,6 +25,7 @@ const filters = ref({
 
 const pagination = ref({ skip: 0, limit: 50 });
 
+let detailReqId = 0;
 const showCreateDialog = ref(false);
 const createForm = ref({
   sn: "",
@@ -151,18 +152,21 @@ async function openDetail(row: WorkOrderItem) {
   detailSteps.value = [];
   showDetailDialog.value = true;
   detailLoading.value = true;
+  const reqId = ++detailReqId;
   try {
     const [{ data: wo }, { data: steps }] = await Promise.all([
       workorderApi.get(row.id),
       workorderApi.steps(row.id),
     ]);
+    if (reqId !== detailReqId) return;
     detailWorkorder.value = wo;
     detailSteps.value = steps;
   } catch (e: unknown) {
+    if (reqId !== detailReqId) return;
     ElMessage.error(parseErrorMsg(e, "加载工单详情失败"));
     showDetailDialog.value = false;
   } finally {
-    detailLoading.value = false;
+    if (reqId === detailReqId) detailLoading.value = false;
   }
 }
 

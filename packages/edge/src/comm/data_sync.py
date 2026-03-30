@@ -11,10 +11,13 @@ import time
 from dataclasses import dataclass, field
 from enum import IntEnum
 from pathlib import Path
-from typing import Any, Callable
+from typing import TYPE_CHECKING, Any, Callable
 
 from loguru import logger
 from minio import Minio
+
+if TYPE_CHECKING:
+    from src.storage.sqlite_store import SQLiteStore
 
 
 class MinIOUploader:
@@ -74,8 +77,16 @@ class SyncTask:
 
 class OfflineDataSync:
 
-    def __init__(self, sender: Callable[[dict[str, Any]], None]) -> None:
+    def __init__(
+        self,
+        sender: Callable[[dict[str, Any]], None],
+        *,
+        dead_letter_store: SQLiteStore | None = None,
+        dead_letter_jsonl: Path | None = None,
+    ) -> None:
         self._sender = sender
+        self._dead_letter_store = dead_letter_store
+        self._dead_letter_jsonl = dead_letter_jsonl
         self._queue: list[SyncTask] = []
         self._lock = threading.Lock()
         self._seq = 0
@@ -111,12 +122,39 @@ class OfflineDataSync:
             except Exception as e:
                 retries = getattr(task, "_retries", 0) + 1
                 if retries >= 5:
-                    logger.error("补传任务超过最大重试次数，丢弃: {}", e)
+                    self._persist_dead_letter(task, e)
                     continue
                 task._retries = retries
                 logger.warning("补传发送失败 ({}/5)，重新入队: {}", retries, e)
                 with self._lock:
                     heapq.heappush(self._queue, task)
+
+    def _persist_dead_letter(self, task: SyncTask, err: Exception) -> None:
+        """超过重试次数后写入 SQLite 或 JSONL，禁止静默丢弃。"""
+        logger.error("补传任务超过最大重试次数，已写入死信队列: {}", err)
+        if self._dead_letter_store:
+            try:
+                self._dead_letter_store.save_sync_dead_letter(
+                    task.priority, task.payload, last_error=str(err), object_path=task.payload.get("local_path")
+                )
+            except Exception as ex:
+                logger.critical("死信写入 SQLite 失败: {}", ex)
+        if self._dead_letter_jsonl:
+            try:
+                line = json.dumps(
+                    {
+                        "priority": task.priority,
+                        "payload": task.payload,
+                        "error": str(err),
+                        "ts": time.time(),
+                    },
+                    ensure_ascii=False,
+                )
+                self._dead_letter_jsonl.parent.mkdir(parents=True, exist_ok=True)
+                with open(self._dead_letter_jsonl, "a", encoding="utf-8") as f:
+                    f.write(line + "\n")
+            except Exception as ex:
+                logger.critical("死信写入 JSONL 失败: {}", ex)
 
     def _pop_task(self) -> SyncTask | None:
         with self._lock:

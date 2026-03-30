@@ -33,6 +33,7 @@ async def _handle_alert(station_id: str, payload: dict) -> None:
     from src.models.station import Station
 
     alert_id = None
+    persisted = False
     try:
         async with async_session_factory() as session:
             alert = AlertEvent(
@@ -55,12 +56,14 @@ async def _handle_alert(station_id: str, payload: dict) -> None:
             await session.commit()
             await session.refresh(alert)
             alert_id = alert.id
+            persisted = True
             logger.info("报警已入库: id={} type={} station={}", alert.id, alert.alert_type, station_id)
     except Exception as e:
         logger.error("报警入库失败: station={} error={}", station_id, e)
 
     await broadcast_to_station(station_id, {
         "type": "alert",
+        "persisted": persisted,
         "alert": {
             "id": alert_id,
             "alert_type": payload.get("alert_code", "UNKNOWN"),

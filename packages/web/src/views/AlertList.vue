@@ -16,20 +16,24 @@ const filters = ref({
 const pagination = ref({ skip: 0, limit: 50 });
 
 let refreshTimer: ReturnType<typeof setInterval> | null = null;
+let alertReqId = 0;
 
 async function loadAlerts() {
   loading.value = true;
+  const reqId = ++alertReqId;
   try {
     const params: Record<string, unknown> = { ...pagination.value };
     if (filters.value.severity) params.severity = filters.value.severity;
     if (filters.value.alert_type) params.alert_type = filters.value.alert_type;
     if (filters.value.acknowledged) params.acknowledged = filters.value.acknowledged;
     const { data } = await alertApi.list(params as Parameters<typeof alertApi.list>[0]);
+    if (reqId !== alertReqId) return;
     alerts.value = data;
   } catch {
+    if (reqId !== alertReqId) return;
     ElMessage.error("加载报警列表失败");
   } finally {
-    loading.value = false;
+    if (reqId === alertReqId) loading.value = false;
   }
 }
 

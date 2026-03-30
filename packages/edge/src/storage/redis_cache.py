@@ -24,9 +24,13 @@ class RedisCache:
 
     def get_json(self, key: str) -> Any | None:
         data = self._client.get(key)
-        if data:
+        if not data:
+            return None
+        try:
             return json.loads(data)
-        return None
+        except json.JSONDecodeError as e:
+            logger.warning("Redis 键 {} 内容非合法 JSON，已忽略: {}", key, e)
+            return None
 
     def delete(self, key: str) -> None:
         self._client.delete(key)

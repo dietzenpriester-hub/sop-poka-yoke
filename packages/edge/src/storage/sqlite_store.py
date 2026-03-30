@@ -72,6 +72,23 @@ class SQLiteStore:
             self._conn.execute(f"UPDATE step_records SET synced=1 WHERE id IN ({placeholders})", record_ids)
             self._conn.commit()
 
+    def save_sync_dead_letter(
+        self, priority: int, payload: dict, *, last_error: str = "", object_path: str | None = None
+    ) -> int:
+        """补传多次失败后的死信：写入 sync_queue，避免静默丢失。"""
+        merged = dict(payload)
+        merged["_dead_letter"] = True
+        merged["_last_sync_error"] = last_error
+        op = object_path if object_path is not None else merged.get("local_path")
+        blob = json.dumps(merged, ensure_ascii=False)
+        with self._lock:
+            cursor = self._conn.execute(
+                "INSERT INTO sync_queue (priority, payload, object_path, status) VALUES (?,?,?,?)",
+                (priority, blob, op, "dead_letter"),
+            )
+            self._conn.commit()
+            return int(cursor.lastrowid or 0)
+
     def close(self) -> None:
         with self._lock:
             self._conn.close()

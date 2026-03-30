@@ -110,7 +110,11 @@ if check_port 5173; then
 else
     echo -e "  启动前端..."
     cd "$PROJECT_DIR/packages/web"
-    npm run dev >"$LOG_DIR/frontend.log" 2>&1 &
+    if command -v pnpm &>/dev/null; then
+        pnpm dev >"$LOG_DIR/frontend.log" 2>&1 &
+    else
+        npm run dev >"$LOG_DIR/frontend.log" 2>&1 &
+    fi
     wait_for_port 5173 "前端"
 fi
 

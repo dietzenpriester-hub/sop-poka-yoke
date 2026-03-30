@@ -107,10 +107,24 @@ async def delete_station(
     db: AsyncSession = Depends(get_db),
     admin: dict = Depends(require_admin),
 ):
+    from src.models.alert import AlertEvent
+    from src.models.workorder import WorkOrder
+
     result = await db.execute(select(Station).where(Station.id == station_id))
     station = result.scalar_one_or_none()
     if not station:
         raise HTTPException(status_code=404, detail="工位不存在")
+    wo_count = (await db.execute(
+        select(func.count(WorkOrder.id)).where(WorkOrder.station_id == station_id)
+    )).scalar_one()
+    alert_count = (await db.execute(
+        select(func.count(AlertEvent.id)).where(AlertEvent.station_id == station_id)
+    )).scalar_one()
+    if wo_count > 0 or alert_count > 0:
+        raise HTTPException(
+            status_code=409,
+            detail=f"工位存在关联数据（工单 {wo_count} 条，报警 {alert_count} 条），无法删除",
+        )
     await db.delete(station)
     await db.commit()
     return {"message": "工位已删除"}

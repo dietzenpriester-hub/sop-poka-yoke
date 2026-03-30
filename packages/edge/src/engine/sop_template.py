@@ -15,8 +15,12 @@ class SOPTemplateLoader:
 
     def load_from_file(self, path: str | Path) -> dict:
         p = Path(path)
-        with open(p, "r", encoding="utf-8") as f:
-            template = json.load(f)
+        try:
+            with open(p, "r", encoding="utf-8") as f:
+                template = json.load(f)
+        except json.JSONDecodeError as e:
+            logger.error("SOP 模板 JSON 解析失败: {} {}", p, e)
+            raise
         self._templates[template["name"]] = template
         logger.info("SOP 模板已加载: {} ({})", template["name"], template.get("version", "N/A"))
         return template

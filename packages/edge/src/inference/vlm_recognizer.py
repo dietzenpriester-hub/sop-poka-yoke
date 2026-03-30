@@ -42,10 +42,20 @@ class VLMClient:
             resp = self.client.post(f"{self.base_url}/api/chat", json=payload)
             resp.raise_for_status()
             result = resp.json()
-            return self._parse_response(result["message"]["content"])
+            return self._parse_response(self._extract_message_content(result))
         except Exception as e:
             logger.error("VLM 推理失败: {}", e)
             return {"action": "unknown", "confidence": 0.0, "description": str(e)}
+
+    @staticmethod
+    def _extract_message_content(result: dict) -> str:
+        """兼容 Ollama /chat 不同响应结构，避免 KeyError。"""
+        msg = result.get("message")
+        if isinstance(msg, dict):
+            return str(msg.get("content", ""))
+        if isinstance(msg, str):
+            return msg
+        return ""
 
     def classify_action_with_retry(self, frames: list, sop_context: dict, max_retries: int = 2) -> dict:
         for attempt in range(max_retries + 1):

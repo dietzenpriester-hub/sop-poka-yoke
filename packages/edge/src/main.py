@@ -20,11 +20,12 @@ from loguru import logger
 from src.capture.motion_detect import KeyframeExtractor
 from src.capture.recorder import VideoRecorder
 from src.capture.rtsp_client import RTSPStream
-from src.comm.data_sync import MinIOUploader, OfflineDataSync, Priority
+from src.comm.data_sync import OfflineDataSync, Priority
 from src.comm.mqtt_client import MQTTClient
 from src.engine.material_check import BOMValidator
 from src.engine.state_machine import SOPStateMachine
 from src.inference.yolo_detector import ObjectTracker, YOLODetector
+from src.storage.sqlite_store import SQLiteStore
 
 
 def _load_sop_template() -> dict:
@@ -93,9 +94,9 @@ def main() -> None:
 
     camera_url = os.environ.get("SOP_RTSP_URL", "0")
     station_id = os.environ.get("SOP_STATION_ID", "ST-01")
-    mqtt_broker = os.environ.get("SOP_MQTT_HOST", "localhost")
-    mqtt_port = int(os.environ.get("SOP_MQTT_PORT", "1883"))
-    mqtt_prefix = os.environ.get("SOP_MQTT_PREFIX", "sop")
+    mqtt_broker = os.environ.get("SOP_MQTT_BROKER_HOST", os.environ.get("SOP_MQTT_HOST", "localhost"))
+    mqtt_port = int(os.environ.get("SOP_MQTT_BROKER_PORT", os.environ.get("SOP_MQTT_PORT", "1883")))
+    mqtt_prefix = os.environ.get("SOP_MQTT_TOPIC_PREFIX", os.environ.get("SOP_MQTT_PREFIX", "sop"))
 
     logger.info("═══ SOP 边缘计算启动 ═══")
     logger.info("  摄像头: {}", camera_url)
@@ -112,7 +113,6 @@ def main() -> None:
         use_gstreamer=os.environ.get("SOP_USE_GSTREAMER", "0") == "1",
     )
     motion = KeyframeExtractor()
-    recorder = VideoRecorder(output_dir=str(repo_root / "data/clips"))
 
     logger.info("加载 YOLO 模型...")
     detector = YOLODetector(model_path=os.environ.get("SOP_YOLO_MODEL", "yolo11n.pt"))
@@ -144,8 +144,19 @@ def main() -> None:
             mqtt_client.publish(topic, payload)
         logger.warning("[报警] {}", json.dumps(payload, ensure_ascii=False)[:200])
 
-    sync = OfflineDataSync(sender=lambda p: send_detection(p))
+    # 本地库：步骤记录 + 补传死信（P0：禁止静默丢弃）
+    local_db = SQLiteStore(str(repo_root / "data/edge_local.db"))
+    sync = OfflineDataSync(
+        sender=lambda p: send_detection(p),
+        dead_letter_store=local_db,
+        dead_letter_jsonl=repo_root / "data/sync_dead_letter.jsonl",
+    )
     sync.start_worker()
+
+    recorder = VideoRecorder(
+        output_dir=str(repo_root / "data/clips"),
+        on_clip_saved=lambda p: sync.enqueue(Priority.P3, {"type": "video", "local_path": p}),
+    )
 
     fsm = SOPStateMachine(
         _load_sop_template(),
@@ -153,9 +164,7 @@ def main() -> None:
     )
 
     if vlm:
-        bom = BOMValidator(vlm, detector)
-    else:
-        bom = None
+        BOMValidator(vlm, detector)  # 预留：物料校验等扩展
 
     stream.start()
     alerter.connect()
@@ -188,7 +197,7 @@ def main() -> None:
                 continue
 
             dets = detector.detect(frame)
-            events = tracker.update(dets)
+            tracker.update(dets)
             detect_count += 1
 
             det_dicts = [dataclasses.asdict(d) for d in dets] if isinstance(dets, list) else []
@@ -225,14 +234,14 @@ def main() -> None:
 
             if result.get("event") == "step_ng":
                 alerter.alert_error()
-                path = recorder.trigger_save("STEP_NG", fsm.work_order_sn or "", fsm.current_step_index)
+                recorder.trigger_save("STEP_NG", fsm.work_order_sn or "", fsm.current_step_index)
                 send_alert({
                     "alert_code": "STEP_NG",
                     "severity": "ERROR",
                     "message": f"步骤 NG: {result}",
                     "step_index": fsm.current_step_index,
                 })
-                sync.enqueue(Priority.P3, {"type": "video", "local_path": path})
+                # 视频路径在文件成功落盘后由 on_clip_saved 入队，避免上传不存在的路径
             elif result.get("event") == "step_ok":
                 alerter.alert_ok()
             elif result.get("event") == "complete":
@@ -252,6 +261,7 @@ def main() -> None:
             mqtt_client.disconnect()
         if vlm:
             vlm.close()
+        local_db.close()
         logger.info("═══ 边缘计算已停止（共 {} 次检测）═══", detect_count)
 
 

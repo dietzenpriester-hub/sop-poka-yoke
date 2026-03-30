@@ -35,7 +35,7 @@ def _get_minio_client() -> Minio:
         settings.MINIO_ENDPOINT,
         settings.MINIO_ACCESS_KEY,
         settings.MINIO_SECRET_KEY,
-        secure=False,
+        secure=settings.MINIO_SECURE,
     )
 
 

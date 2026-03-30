@@ -1,7 +1,7 @@
 """SOP 有限状态机（含防抖机制）"""
 
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from enum import Enum
 
 from loguru import logger
@@ -40,11 +40,19 @@ class StepResult:
     snapshot_url: str = ""
 
 
+_STEP_KW_FIELDS = {f.name for f in fields(StepDefinition)} - {"index"}
+
+
 class SOPStateMachine:
 
     def __init__(self, sop_template: dict, debounce_seconds: float = 0.5) -> None:
         self.template_name = sop_template["name"]
-        self.steps = [StepDefinition(index=i, **step) for i, step in enumerate(sop_template["steps"])]
+        self.steps = []
+        for i, raw in enumerate(sop_template["steps"]):
+            step = raw if isinstance(raw, dict) else {}
+            filtered = {k: v for k, v in step.items() if k in _STEP_KW_FIELDS}
+            filtered.setdefault("name", f"步骤{i + 1}")
+            self.steps.append(StepDefinition(index=i, **filtered))
         self.debounce_seconds = debounce_seconds
         self.status = SOPStatus.IDLE
         self.current_step_index = 0

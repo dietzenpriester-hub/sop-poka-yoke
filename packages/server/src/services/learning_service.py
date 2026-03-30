@@ -58,7 +58,10 @@ class LearningService:
 
     async def _run_analysis(self, task_id: str, db: AsyncSession) -> None:
         result = await db.execute(select(LearningTask).where(LearningTask.task_id == task_id))
-        task = result.scalar_one()
+        task = result.scalar_one_or_none()
+        if task is None:
+            logger.warning("分析任务 {} 已被删除，跳过", task_id)
+            return
 
         async def progress_callback(progress: float, phase_name: str, detail: dict[str, Any]):
             task.progress = progress

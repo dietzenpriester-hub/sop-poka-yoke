@@ -17,6 +17,7 @@ async def list_sop_templates(
     skip: int = Query(default=0, ge=0),
     limit: int = Query(default=50, ge=1, le=500),
     db: AsyncSession = Depends(get_db),
+    _: dict = Depends(get_current_user),
 ):
     return await _svc.list_templates(db, skip=skip, limit=limit)
 

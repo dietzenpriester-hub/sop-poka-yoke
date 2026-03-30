@@ -17,6 +17,7 @@ class TabletWebSocketServer:
         self.host = host
         self.port = port
         self._clients: list[aiohttp.web.WebSocketResponse] = []
+        self._clients_lock = asyncio.Lock()
 
     async def handler(self, request: aiohttp.web.Request) -> aiohttp.web.WebSocketResponse:
         ws = aiohttp.web.WebSocketResponse()
@@ -39,27 +40,38 @@ class TabletWebSocketServer:
                 logger.warning("WebSocket 认证失败：{}", e)
                 await ws.close()
                 return ws
-        self._clients.append(ws)
+        async with self._clients_lock:
+            self._clients.append(ws)
         logger.info("平板 WebSocket 已连接")
         try:
             async for msg in ws:
                 if msg.type == aiohttp.WSMsgType.TEXT:
                     logger.debug("平板消息: {}", msg.data)
         finally:
-            self._clients.remove(ws)
+            async with self._clients_lock:
+                try:
+                    self._clients.remove(ws)
+                except ValueError:
+                    pass
         return ws
 
     async def broadcast(self, data: dict[str, Any]) -> None:
         message = json.dumps(data, ensure_ascii=False)
-        dead_clients = []
-        for ws in list(self._clients):
+        async with self._clients_lock:
+            clients = list(self._clients)
+        dead_clients: list[aiohttp.web.WebSocketResponse] = []
+        for ws in clients:
             try:
                 await ws.send_str(message)
             except Exception:
                 dead_clients.append(ws)
-        for ws in dead_clients:
-            if ws in self._clients:
-                self._clients.remove(ws)
+        if dead_clients:
+            async with self._clients_lock:
+                for ws in dead_clients:
+                    try:
+                        self._clients.remove(ws)
+                    except ValueError:
+                        pass
 
     async def start(self) -> None:
         app = aiohttp.web.Application()

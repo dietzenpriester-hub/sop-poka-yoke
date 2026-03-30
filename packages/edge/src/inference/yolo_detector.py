@@ -54,7 +54,7 @@ class YOLODetector:
                 x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
                 cls_id = int(box.cls[0])
                 conf = float(box.conf[0])
-                name = self.model.names[cls_id]
+                name = self.model.names.get(cls_id, f"class_{cls_id}")
                 cx, cy = (x1 + x2) / 2, (y1 + y2) / 2
                 detections.append(Detection(
                     class_id=cls_id, class_name=name, confidence=conf,

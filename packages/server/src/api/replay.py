@@ -41,7 +41,7 @@ def _validate_clip_object_name(object_name: str) -> None:
 async def list_clips(
     sn: str | None = None,
     station_code: str | None = None,
-    event_type: str | None = Query(default=None, description="step 或 alert"),
+    event_type: str = Query(default="step", description="step 或 alert", pattern="^(step|alert)$"),
     date_from: datetime | None = None,
     date_to: datetime | None = None,
     skip: int = Query(default=0, ge=0),
@@ -110,7 +110,7 @@ async def list_clips(
             })
 
     clips.sort(key=lambda c: c.get("created_at") or "", reverse=True)
-    return {"items": clips[:limit]}
+    return {"items": clips}
 
 
 @router.get("/clip-url")

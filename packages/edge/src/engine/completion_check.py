@@ -1,7 +1,6 @@
 """完工视觉比对检测器"""
 
 import cv2
-import numpy as np
 from loguru import logger
 
 
@@ -24,6 +23,9 @@ class VisualInspector:
         vlm_result = self.vlm.classify_action([frame, ref_image], prompt_ctx)
         gray_frame = cv2.cvtColor(cv2.resize(frame, (640, 480)), cv2.COLOR_BGR2GRAY)
         gray_ref = cv2.cvtColor(cv2.resize(ref_image, (640, 480)), cv2.COLOR_BGR2GRAY)
+        if gray_frame.shape != gray_ref.shape:
+            logger.error("完工比对尺寸不一致: frame={} ref={}", gray_frame.shape, gray_ref.shape)
+            return {"result": "ERROR", "message": "参考图与当前帧尺寸不一致"}
         similarity = float(cv2.matchTemplate(gray_frame, gray_ref, cv2.TM_CCOEFF_NORMED).max())
         passed = vlm_result.get("matches_expected", False) and similarity > 0.7
         return {

@@ -1,5 +1,19 @@
 import { createRouter, createWebHistory } from "vue-router";
 
+function parseJwtPayload(token: string): Record<string, unknown> | null {
+  try {
+    return JSON.parse(atob(token.split(".")[1]));
+  } catch {
+    return null;
+  }
+}
+
+function isTokenExpired(token: string): boolean {
+  const payload = parseJwtPayload(token);
+  if (!payload || typeof payload.exp !== "number") return true;
+  return Date.now() / 1000 > payload.exp;
+}
+
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
   routes: [
@@ -22,19 +36,16 @@ const router = createRouter({
 
 router.beforeEach((to) => {
   const token = sessionStorage.getItem("sop_token");
-  if (to.name === "login" && token) {
+  if (to.name === "login" && token && !isTokenExpired(token)) {
     return { name: "dashboard" };
   }
-  if (!to.meta?.public && !token) {
+  if (!to.meta?.public && (!token || isTokenExpired(token))) {
+    sessionStorage.removeItem("sop_token");
     return { name: "login" };
   }
-  if (to.meta?.requiresAdmin) {
-    try {
-      const payload = JSON.parse(atob(token!.split(".")[1]));
-      if (payload.role !== "admin") return { name: "dashboard" };
-    } catch {
-      return { name: "dashboard" };
-    }
+  if (to.meta?.requiresAdmin && token) {
+    const payload = parseJwtPayload(token);
+    if (!payload || payload.role !== "admin") return { name: "dashboard" };
   }
 });
 

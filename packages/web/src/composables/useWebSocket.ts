@@ -55,7 +55,7 @@ export function useStationWebSocket(
         const data = JSON.parse(event.data as string);
         onMessage(data);
       } catch {
-        onMessage(event.data);
+        onMessage({ type: "raw", data: event.data });
       }
     };
     ws.onerror = () => {

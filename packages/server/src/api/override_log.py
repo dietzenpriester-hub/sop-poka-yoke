@@ -71,9 +71,9 @@ async def list_override_logs(
 async def create_override_log(
     data: OverrideLogCreate,
     db: AsyncSession = Depends(get_db),
-    _: dict = Depends(get_current_user),
+    _: dict = Depends(require_admin),
 ):
-    """创建强制放行记录（通常由边缘端在工牌覆盖时调用）。"""
+    """创建强制放行记录（仅管理员或边缘端服务账户可调用）。"""
     wo = await db.execute(select(WorkOrder.id).where(WorkOrder.id == data.workorder_id))
     if wo.scalar_one_or_none() is None:
         raise HTTPException(status_code=404, detail="工单不存在")

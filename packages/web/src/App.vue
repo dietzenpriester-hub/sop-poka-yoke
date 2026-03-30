@@ -61,6 +61,8 @@ function jwtRole(): string | null {
   }
 }
 
+const isLoginPage = computed(() => route.path === "/login");
+
 const isAdmin = computed(() => {
   void route.fullPath;
   return jwtRole() === "admin";
@@ -96,7 +98,11 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <el-container style="height: 100vh">
+  <template v-if="isLoginPage">
+    <RouterView />
+  </template>
+
+  <el-container v-else style="height: 100vh">
     <el-aside :width="isCollapse ? '64px' : '200px'" style="transition: width 0.3s">
       <div style="padding: 16px; text-align: center; font-weight: bold; font-size: 16px; color: #409eff">
         <span v-if="!isCollapse">SOP 防呆系统</span>

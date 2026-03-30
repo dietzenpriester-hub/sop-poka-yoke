@@ -20,7 +20,9 @@ class PLCController:
 
     def write_register(self, address: int, value: int) -> None:
         if self._client:
-            self._client.write_register(address, value)
+            resp = self._client.write_register(address, value)
+            if resp.isError():
+                logger.error("PLC 写寄存器失败: addr={} value={} resp={}", address, value, resp)
 
     def read_register(self, address: int, count: int = 1) -> list[int]:
         if self._client:

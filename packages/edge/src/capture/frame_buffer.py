@@ -25,6 +25,7 @@ class RingFrameBuffer:
             return self._buffer[-1] if self._buffer else None
 
     def get_last_n(self, n: int = 5) -> list[FrameItem]:
+        n = max(0, n)
         with self._lock:
             return list(self._buffer)[-n:]
 

@@ -3,7 +3,6 @@
 import threading
 
 import numpy as np
-from loguru import logger
 
 
 class ActionEmbeddingComparator:

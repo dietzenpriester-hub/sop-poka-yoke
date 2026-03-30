@@ -52,7 +52,10 @@ class WorkOrderService:
 
     @staticmethod
     async def create(db: AsyncSession, data: WorkOrderCreate) -> WorkOrder:
-        wo = WorkOrder(**data.model_dump())
+        dump = data.model_dump()
+        if dump.get("status") == "done":
+            dump["end_time"] = datetime.now(timezone.utc)
+        wo = WorkOrder(**dump)
         db.add(wo)
         await db.commit()
         await db.refresh(wo)
