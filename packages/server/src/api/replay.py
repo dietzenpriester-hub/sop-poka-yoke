@@ -4,7 +4,7 @@ import re
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.database import get_db
@@ -52,8 +52,15 @@ async def list_clips(
     """查询视频片段列表。合并步骤视频和报警视频。"""
     clips: list[dict] = []
     storage = get_storage_service()
+    total = 0
 
     if event_type != "alert":
+        count_q = (
+            select(func.count(StepRecord.id))
+            .select_from(StepRecord)
+            .join(WorkOrder, StepRecord.workorder_id == WorkOrder.id)
+            .where(StepRecord.video_url != "", StepRecord.video_url.isnot(None))
+        )
         q = (
             select(StepRecord, WorkOrder.sn)
             .join(WorkOrder, StepRecord.workorder_id == WorkOrder.id)
@@ -61,10 +68,14 @@ async def list_clips(
         )
         if sn:
             q = q.where(WorkOrder.sn.ilike(f"%{sn}%"))
+            count_q = count_q.where(WorkOrder.sn.ilike(f"%{sn}%"))
         if date_from:
             q = q.where(StepRecord.created_at >= date_from)
+            count_q = count_q.where(StepRecord.created_at >= date_from)
         if date_to:
             q = q.where(StepRecord.created_at <= date_to)
+            count_q = count_q.where(StepRecord.created_at <= date_to)
+        total = int((await db.execute(count_q)).scalar_one())
         q = q.order_by(StepRecord.created_at.desc())
         result = await db.execute(q.offset(skip).limit(limit))
         for record, wo_sn in result:
@@ -83,15 +94,22 @@ async def list_clips(
             })
 
     if event_type != "step":
+        aq_count = select(func.count(AlertEvent.id)).where(
+            AlertEvent.video_url != "", AlertEvent.video_url.isnot(None)
+        )
         aq = select(AlertEvent).where(
             AlertEvent.video_url != "", AlertEvent.video_url.isnot(None)
         )
         if station_code:
             aq = aq.where(AlertEvent.station_code == station_code)
+            aq_count = aq_count.where(AlertEvent.station_code == station_code)
         if date_from:
             aq = aq.where(AlertEvent.created_at >= date_from)
+            aq_count = aq_count.where(AlertEvent.created_at >= date_from)
         if date_to:
             aq = aq.where(AlertEvent.created_at <= date_to)
+            aq_count = aq_count.where(AlertEvent.created_at <= date_to)
+        total = int((await db.execute(aq_count)).scalar_one())
         aq = aq.order_by(AlertEvent.created_at.desc())
         alert_result = await db.execute(aq.offset(skip).limit(limit))
         for alert in alert_result.scalars():
@@ -110,7 +128,7 @@ async def list_clips(
             })
 
     clips.sort(key=lambda c: c.get("created_at") or "", reverse=True)
-    return {"items": clips}
+    return {"items": clips, "total": total}
 
 
 @router.get("/clip-url")

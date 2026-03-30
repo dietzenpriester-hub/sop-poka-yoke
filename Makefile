@@ -35,7 +35,7 @@ db-revision:
 
 # === 协议生成 ===
 codegen:
-	bash packages/shared/codegen.sh
+	bash $(CURDIR)/packages/shared/codegen.sh
 
 # === 生产部署 ===
 prod-up:

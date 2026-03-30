@@ -84,6 +84,14 @@ class WorkOrderService:
         from src.models.override_log import OverrideLog
 
         wo_id = wo.id
+        step_cnt = (await db.execute(
+            select(func.count(StepRecord.id)).where(StepRecord.workorder_id == wo_id)
+        )).scalar_one()
+        if int(step_cnt) > 0:
+            n = int(step_cnt)
+            raise ValueError(
+                f"工单存在关联步骤记录；删除将级联删除 {n} 条步骤记录，请先处理关联数据再删除"
+            )
         for model, label in [
             (AlertEvent, "报警"),
             (MaterialCheck, "物料校验"),

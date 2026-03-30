@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory } from "vue-router";
 import { parseJwtPayload, isTokenExpired } from "@/utils/jwt";
 import { STORAGE_TOKEN_KEY } from "@/utils/constants";
+import { useAuthStore } from "@/stores/auth";
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -29,6 +30,7 @@ router.beforeEach((to) => {
   }
   if (!to.meta?.public && (!token || isTokenExpired(token))) {
     sessionStorage.removeItem(STORAGE_TOKEN_KEY);
+    useAuthStore().logout();
     return { name: "login" };
   }
   if (to.meta?.requiresAdmin && token) {

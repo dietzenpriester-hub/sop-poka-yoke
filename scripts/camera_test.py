@@ -140,7 +140,7 @@ def main():
                   f"{len(detections)} 个物体 ({class_summary or '无'})")
 
             if mqtt_client:
-                topic = MQTTTopics.detection(args.station)
+                topic = MQTTTopics().detection(args.station)
                 mqtt_client.publish(topic, json.dumps(payload, ensure_ascii=False))
 
             if args.show and results:

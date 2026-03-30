@@ -1,6 +1,7 @@
 """用户认证"""
 
 import asyncio
+import random
 import time
 from collections import defaultdict
 
@@ -18,16 +19,16 @@ router = APIRouter()
 
 _LOGIN_WINDOW = 300  # 5 分钟窗口
 _MAX_ATTEMPTS = 10
-_login_attempts: dict[str, list[float]] = defaultdict(list)
+_LOGIN_ATTEMPTS: dict[str, list[float]] = defaultdict(list)
 
 
 def _check_rate_limit(client_ip: str) -> None:
+    """仅根据历史失败次数检查；成功登录后由 login 清空该 IP 记录。"""
     now = time.monotonic()
-    attempts = _login_attempts[client_ip]
-    _login_attempts[client_ip] = [t for t in attempts if now - t < _LOGIN_WINDOW]
-    if len(_login_attempts[client_ip]) >= _MAX_ATTEMPTS:
+    attempts = _LOGIN_ATTEMPTS[client_ip]
+    _LOGIN_ATTEMPTS[client_ip] = [t for t in attempts if now - t < _LOGIN_WINDOW]
+    if len(_LOGIN_ATTEMPTS[client_ip]) >= _MAX_ATTEMPTS:
         raise HTTPException(status_code=429, detail="登录尝试过于频繁，请稍后再试")
-    _login_attempts[client_ip].append(now)
 
 
 class LoginRequest(BaseModel):
@@ -44,7 +45,9 @@ async def login(req: LoginRequest, request: Request, db: AsyncSession = Depends(
     )
     user = result.scalar_one_or_none()
     if not user or not _verify_password(req.password, user.password_hash):
-        await asyncio.sleep(0.5)
+        _LOGIN_ATTEMPTS[client_ip].append(time.monotonic())
+        await asyncio.sleep(0.3 + random.random() * 0.5)
         raise HTTPException(status_code=401, detail="用户名或密码错误")
+    _LOGIN_ATTEMPTS.pop(client_ip, None)
     token = create_access_token(user_id=user.id, role=user.role)
     return {"access_token": token, "token_type": "bearer"}

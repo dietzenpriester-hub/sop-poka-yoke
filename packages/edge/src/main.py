@@ -23,7 +23,7 @@ from src.capture.rtsp_client import RTSPStream
 from src.comm.data_sync import OfflineDataSync, Priority
 from src.comm.mqtt_client import MQTTClient
 from src.engine.material_check import BOMValidator
-from src.engine.state_machine import SOPStateMachine
+from src.engine.state_machine import SOPStateMachine, SOPStatus
 from src.inference.yolo_detector import ObjectTracker, YOLODetector
 from src.storage.sqlite_store import SQLiteStore
 
@@ -178,6 +178,17 @@ def main() -> None:
             timeout_evt = fsm.check_timeout()
             if timeout_evt:
                 logger.warning("SOP 步骤超时: {}", timeout_evt)
+                tidx = int(timeout_evt.get("step_index", fsm.current_step_index))
+                tstep = fsm.steps[tidx] if tidx < len(fsm.steps) else None
+                local_db.save_step_record(
+                    fsm.work_order_sn or "",
+                    tidx,
+                    tstep.name if tstep else "",
+                    "TIMEOUT",
+                    0.0,
+                    "",
+                    "",
+                )
                 alerter.alert_error()
                 send_alert({
                     "alert_code": "STEP_TIMEOUT",
@@ -192,6 +203,10 @@ def main() -> None:
                 continue
 
             frame, ts = item
+            if fsm.status == SOPStatus.TIMEOUT:
+                recorder.feed(frame, ts)
+                continue
+
             if not motion.is_keyframe(frame):
                 recorder.feed(frame, ts)
                 continue
@@ -232,7 +247,22 @@ def main() -> None:
             else:
                 result = {"event": "yolo_only"}
 
+            if result.get("type") == "blocked":
+                logger.debug("状态机已阻塞: {}", result.get("reason", ""))
+                recorder.feed(frame, ts)
+                continue
+
             if result.get("event") == "step_ng":
+                cur = fsm.get_current_step()
+                local_db.save_step_record(
+                    fsm.work_order_sn or "",
+                    fsm.current_step_index,
+                    cur.name if cur else "",
+                    "NG",
+                    float(result.get("confidence", 0) or 0),
+                    "",
+                    "",
+                )
                 alerter.alert_error()
                 recorder.trigger_save("STEP_NG", fsm.work_order_sn or "", fsm.current_step_index)
                 send_alert({
@@ -243,8 +273,42 @@ def main() -> None:
                 })
                 # 视频路径在文件成功落盘后由 on_clip_saved 入队，避免上传不存在的路径
             elif result.get("event") == "step_ok":
+                if fsm.results:
+                    sr = fsm.results[-1]
+                    local_db.save_step_record(
+                        fsm.work_order_sn or "",
+                        sr.step_index,
+                        sr.step_name,
+                        sr.result,
+                        sr.confidence,
+                        "",
+                        "",
+                    )
                 alerter.alert_ok()
+            elif result.get("event") == "override_ok":
+                if fsm.results:
+                    sr = fsm.results[-1]
+                    local_db.save_step_record(
+                        fsm.work_order_sn or "",
+                        sr.step_index,
+                        sr.step_name,
+                        sr.result,
+                        sr.confidence,
+                        "",
+                        "",
+                    )
             elif result.get("event") == "complete":
+                if fsm.results:
+                    sr = fsm.results[-1]
+                    local_db.save_step_record(
+                        fsm.work_order_sn or "",
+                        sr.step_index,
+                        sr.step_name,
+                        sr.result,
+                        sr.confidence,
+                        "",
+                        "",
+                    )
                 alerter.alert_ok()
                 logger.info("所有 SOP 步骤完成！")
                 break

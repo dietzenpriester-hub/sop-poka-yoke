@@ -20,12 +20,14 @@ echo "PostgreSQL 已就绪"
 
 # 3. 数据库迁移
 echo "执行数据库迁移..."
+set -a && source "$ROOT/.env" 2>/dev/null && set +a
 cd packages/server
 alembic upgrade head
 cd ../..
 
 # 4. 启动应用服务
 docker compose up -d server web
+echo "注意：监控栈（Prometheus/Grafana）需手动启动: docker compose up -d prometheus grafana"
 
 # 5. 初始化 MinIO bucket
 bash scripts/init_minio.sh

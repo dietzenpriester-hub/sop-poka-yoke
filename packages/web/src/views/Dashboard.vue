@@ -25,13 +25,16 @@ const stationStatus = ref<StationStatusItem[]>([]);
 const recentAlerts = ref<RecentAlert[]>([]);
 const loading = ref(false);
 
-/** 用于 WebSocket：取首个工位 ID，避免硬编码 */
+/**
+ * 仪表盘 WebSocket：当前仅用于展示「实时连接」在线/离线状态（与工位 live 通道的连通性）。
+ * 业务数据由轮询 loadDashboard 拉取；若将来需在此页消费实时推送，可在此 onMessage 中扩展。
+ */
 const wsStationId = ref("");
 
 const { chartRef: trendChartRef, setOption: setTrendOption, resize: resizeTrend } = useECharts();
 
 const { ready: wsReady } = useStationWebSocket(wsStationId, () => {
-  /* 实时推送由其它页面消费；此处仅展示连接状态 */
+  /* 占位：未消费消息；仅保留连接以驱动上方连接状态指示 */
 });
 
 let refreshTimer: ReturnType<typeof setInterval> | null = null;
@@ -264,7 +267,7 @@ onUnmounted(() => {
       </el-col>
     </el-row>
 
-    <!-- WebSocket 状态 -->
+    <!-- WebSocket：仅用于展示与工位 live 通道的连接状态（见 script 顶部注释） -->
     <el-card style="margin-top: 16px">
       <template #header>
         <span>实时连接</span>

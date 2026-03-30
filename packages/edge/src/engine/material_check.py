@@ -21,12 +21,19 @@ class BOMValidator:
             "current_step_index": 0,
         }
         vlm_result = self.vlm.classify_action([frame], prompt_ctx)
+        vlm_ok = bool(vlm_result.get("matches_expected"))
         result = {
-            "result": "OK" if vlm_result.get("matches_expected") else "NG",
+            "result": "OK" if vlm_ok else "NG",
             "detected_objects": detected_names,
             "vlm_analysis": vlm_result,
             "bom_items": bom_list,
+            "low_confidence": False,
         }
+        if not detections and vlm_ok:
+            result["low_confidence"] = True
+            logger.warning(
+                "物料校验：YOLO 无检测但 VLM 判 OK，标记为低置信度（需人工复核）"
+            )
         if result["result"] == "NG":
             logger.warning("物料校验异常: {}", vlm_result)
         return result

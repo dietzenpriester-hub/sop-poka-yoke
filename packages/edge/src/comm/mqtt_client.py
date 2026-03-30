@@ -43,6 +43,14 @@ class MQTTClient:
         info = self._client.publish(topic, data)
         if info.rc != mqtt.MQTT_ERR_SUCCESS:
             logger.warning("MQTT publish 失败: rc={} topic={}", info.rc, topic)
+            return
+        try:
+            info.wait_for_publish(timeout=5)
+        except (ValueError, RuntimeError) as e:
+            logger.warning("MQTT publish 等待确认失败: topic={} err={}", topic, e)
+            return
+        if not info.is_published():
+            logger.warning("MQTT publish 在 {}s 内未完成发送确认: topic={}", 5, topic)
 
     def subscribe(self, topic: str, handler: Callable) -> None:
         self._handlers[topic] = handler

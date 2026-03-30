@@ -16,16 +16,17 @@ security_scheme = HTTPBearer(auto_error=False)
 _DEV_TOKEN = "dev-token"
 
 
-def create_access_token(user_id: int, role: str, expires_delta: timedelta | None = None) -> str:
-    """签发 HS256 JWT，包含 exp、sub（user_id）、role。"""
+def create_access_token(user_id: int, role: str | None = None, expires_delta: timedelta | None = None) -> str:
+    """签发 HS256 JWT，包含 exp、sub（user_id）、role（缺省为 operator）。"""
     settings = get_settings()
     if expires_delta is None:
         expires_delta = timedelta(hours=settings.JWT_EXPIRE_HOURS)
     expire = datetime.now(timezone.utc) + expires_delta
+    effective_role = role if role is not None and str(role).strip() != "" else "operator"
     payload = {
         "exp": expire,
         "sub": str(user_id),
-        "role": role,
+        "role": effective_role,
     }
     return jwt.encode(payload, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM)
 

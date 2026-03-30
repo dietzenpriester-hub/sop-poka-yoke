@@ -3,15 +3,7 @@ import { ref, computed, watch, onMounted, onUnmounted } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { learningApi, type LearningTask, type LearningStep } from "@/api/learning";
 import { parseErrorMsg } from "@/utils/httpError";
-
-function formatDateTime(iso: string | null | undefined): string {
-  if (!iso) return "—";
-  try {
-    return new Date(iso).toLocaleString("zh-CN");
-  } catch {
-    return iso;
-  }
-}
+import { formatDateTime } from "@/utils/date";
 
 function isAnalysisRunning(status: string): boolean {
   return !["completed", "failed", "confirmed"].includes(status);

@@ -7,7 +7,7 @@ from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.database import get_db
-from src.core.security import get_current_user, require_admin
+from src.core.security import require_admin
 from src.models.override_log import OverrideLog
 from src.models.workorder import WorkOrder
 from src.schemas.override_log import (
@@ -146,7 +146,7 @@ async def override_stats(
 async def list_by_workorder(
     workorder_id: int,
     db: AsyncSession = Depends(get_db),
-    _: dict = Depends(get_current_user),
+    _: dict = Depends(require_admin),
 ):
     """某工单的全部强制放行记录。"""
     result = await db.execute(

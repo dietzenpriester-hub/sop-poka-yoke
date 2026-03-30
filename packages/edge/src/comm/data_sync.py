@@ -139,6 +139,24 @@ class OfflineDataSync:
                 with self._lock:
                     heapq.heappush(self._queue, task)
 
+    def enqueue_dead_letter_retries(self, store: "SQLiteStore", ids: list[int]) -> int:
+        """将死信标记为 pending 后，按记录重新入队到内存补传队列，并标记为 retried。"""
+        store.retry_dead_letters(ids)
+        rows = store.get_sync_queue_rows_by_ids(ids)
+        n = 0
+        for row in rows:
+            if (row.get("status") or "") != "pending":
+                continue
+            try:
+                payload = json.loads(row["payload"])
+            except (json.JSONDecodeError, TypeError) as e:
+                logger.warning("死信 payload 解析失败 id={}: {}", row.get("id"), e)
+                continue
+            self.enqueue(Priority(int(row["priority"])), payload)
+            store.mark_sync_queue_status(int(row["id"]), "retried")
+            n += 1
+        return n
+
     def _persist_dead_letter(self, task: SyncTask, err: Exception) -> None:
         """超过重试次数后写入 SQLite 或 JSONL，禁止静默丢弃。"""
         logger.error("补传任务超过最大重试次数，已写入死信队列: {}", err)
@@ -149,6 +167,19 @@ class OfflineDataSync:
                 )
             except Exception as ex:
                 logger.critical("死信写入 SQLite 失败: {}", ex)
+                try:
+                    task_dict = {
+                        "priority": task.priority,
+                        "seq": task.seq,
+                        "payload": task.payload,
+                        "error": str(err),
+                        "sqlite_error": str(ex),
+                        "ts": time.time(),
+                    }
+                    with open("dead_letter_fallback.log", "a", encoding="utf-8") as f:
+                        f.write(json.dumps(task_dict, ensure_ascii=False) + "\n")
+                except Exception as fb:
+                    logger.critical("死信 fallback 日志写入失败: {}", fb)
         if self._dead_letter_jsonl:
             try:
                 line = json.dumps(
@@ -165,6 +196,19 @@ class OfflineDataSync:
                     f.write(line + "\n")
             except Exception as ex:
                 logger.critical("死信写入 JSONL 失败: {}", ex)
+                try:
+                    task_dict = {
+                        "priority": task.priority,
+                        "seq": task.seq,
+                        "payload": task.payload,
+                        "error": str(err),
+                        "jsonl_error": str(ex),
+                        "ts": time.time(),
+                    }
+                    with open("dead_letter_fallback.log", "a", encoding="utf-8") as f:
+                        f.write(json.dumps(task_dict, ensure_ascii=False) + "\n")
+                except Exception as fb:
+                    logger.critical("死信 fallback 日志写入失败: {}", fb)
 
     def _pop_task(self) -> SyncTask | None:
         with self._lock:

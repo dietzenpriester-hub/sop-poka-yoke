@@ -1,14 +1,17 @@
 global:
   scrape_interval: 15s
 
-scrape_configs:
-  - job_name: "sop-server"
-    # 需要在 FastAPI 中集成 prometheus-fastapi-instrumentator 暴露 /metrics
-    metrics_path: /metrics
-    static_configs:
-      - targets: ["server:8000"]
+# sop-server：需先在 FastAPI 中安装 prometheus-fastapi-instrumentator 并配置 /metrics 端点。
+# 以下 job 已注释，避免在尚未暴露 /metrics 时无效抓取；启用前取消注释并可按需设置 honor_labels: true
+# - job_name: "sop-server"
+#   metrics_path: /metrics
+#   honor_labels: true
+#   static_configs:
+#     - targets: ["server:8000"]
 
-  # 边缘端指标（需部署 node_exporter 或自定义 Prometheus exporter）
-  # - job_name: "sop-edge"
-  #   static_configs:
-  #     - targets: ["host.docker.internal:9100"]
+# 边缘端指标（需部署 node_exporter 或自定义 Prometheus exporter）
+# - job_name: "sop-edge"
+#   static_configs:
+#     - targets: ["host.docker.internal:9100"]
+
+scrape_configs: []

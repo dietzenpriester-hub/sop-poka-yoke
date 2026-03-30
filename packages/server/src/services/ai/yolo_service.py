@@ -7,6 +7,8 @@ from dataclasses import dataclass, field
 import numpy as np
 from loguru import logger
 
+BATCH_SIZE = 8
+
 
 @dataclass
 class Detection:
@@ -61,23 +63,25 @@ class YOLOService:
         results_list: list[FrameDetections] = []
 
         logger.info("开始 YOLO 检测: {} 帧", len(frames))
-        results = self._model.predict(frames, conf=self._conf, verbose=False)
-
-        for idx, result in enumerate(results):
-            fd = FrameDetections(frame_index=idx)
-            if result.boxes is not None:
-                boxes = result.boxes
-                for i in range(len(boxes)):
-                    cls_id = int(boxes.cls[i].item())
-                    cls_name = result.names.get(cls_id, f"class_{cls_id}")
-                    conf_val = float(boxes.conf[i].item())
-                    x1, y1, x2, y2 = boxes.xyxy[i].tolist()
-                    fd.detections.append(Detection(
-                        class_name=cls_name,
-                        confidence=round(conf_val, 3),
-                        bbox=(int(x1), int(y1), int(x2), int(y2)),
-                    ))
-            results_list.append(fd)
+        for start in range(0, len(frames), BATCH_SIZE):
+            batch = frames[start : start + BATCH_SIZE]
+            batch_results = self._model.predict(batch, conf=self._conf, verbose=False)
+            for i, result in enumerate(batch_results):
+                idx = start + i
+                fd = FrameDetections(frame_index=idx)
+                if result.boxes is not None:
+                    boxes = result.boxes
+                    for j in range(len(boxes)):
+                        cls_id = int(boxes.cls[j].item())
+                        cls_name = result.names.get(cls_id, f"class_{cls_id}")
+                        conf_val = float(boxes.conf[j].item())
+                        x1, y1, x2, y2 = boxes.xyxy[j].tolist()
+                        fd.detections.append(Detection(
+                            class_name=cls_name,
+                            confidence=round(conf_val, 3),
+                            bbox=(int(x1), int(y1), int(x2), int(y2)),
+                        ))
+                results_list.append(fd)
 
         total_dets = sum(len(fd.detections) for fd in results_list)
         logger.info("YOLO 检测完成: {} 帧共检测到 {} 个物体", len(frames), total_dets)

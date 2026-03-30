@@ -6,7 +6,22 @@ _STATION_ID_PATTERN = re.compile(r"^[a-zA-Z0-9_-]+$")
 
 
 class MQTTTopics:
-    """使用 format(station_id=...) 生成最终主题。"""
+    """使用 format(station_id=...) 生成最终主题；前缀可通过构造参数配置。"""
+
+    DEFAULT_PREFIX = "sop"
+
+    def __init__(self, prefix: str = DEFAULT_PREFIX) -> None:
+        p = prefix.strip().strip("/")
+        self._prefix = p if p else self.DEFAULT_PREFIX
+        base = self._prefix
+        self.STEP_COMPLETE = f"{base}/{{station_id}}/step/complete"
+        self.ALERT_RAISE = f"{base}/{{station_id}}/alert/raise"
+        self.WORKORDER_START = f"{base}/{{station_id}}/workorder/start"
+        self.WORKORDER_DONE = f"{base}/{{station_id}}/workorder/done"
+        self.OVERRIDE = f"{base}/{{station_id}}/override"
+        self.HEARTBEAT = f"{base}/{{station_id}}/heartbeat"
+        self.SYNC_QUEUE = f"{base}/{{station_id}}/sync/queue"
+        self.DETECTION = f"{base}/{{station_id}}/detection"
 
     @staticmethod
     def validate_station_id(station_id: str) -> str:
@@ -14,47 +29,29 @@ class MQTTTopics:
             raise ValueError(f"station_id 含非法字符: {station_id!r} (仅允许 a-zA-Z0-9_-)")
         return station_id
 
-    STEP_COMPLETE = "sop/{station_id}/step/complete"
-    ALERT_RAISE = "sop/{station_id}/alert/raise"
-    WORKORDER_START = "sop/{station_id}/workorder/start"
-    WORKORDER_DONE = "sop/{station_id}/workorder/done"
-    OVERRIDE = "sop/{station_id}/override"
-    HEARTBEAT = "sop/{station_id}/heartbeat"
-    SYNC_QUEUE = "sop/{station_id}/sync/queue"
-    DETECTION = "sop/{station_id}/detection"
+    def _topic(self, template: str, station_id: str) -> str:
+        return template.format(station_id=self.validate_station_id(station_id))
 
-    @staticmethod
-    def _topic(template: str, station_id: str) -> str:
-        return template.format(station_id=MQTTTopics.validate_station_id(station_id))
+    def step_complete(self, station_id: str) -> str:
+        return self._topic(self.STEP_COMPLETE, station_id)
 
-    @staticmethod
-    def step_complete(station_id: str) -> str:
-        return MQTTTopics._topic(MQTTTopics.STEP_COMPLETE, station_id)
+    def alert_raise(self, station_id: str) -> str:
+        return self._topic(self.ALERT_RAISE, station_id)
 
-    @staticmethod
-    def alert_raise(station_id: str) -> str:
-        return MQTTTopics._topic(MQTTTopics.ALERT_RAISE, station_id)
+    def workorder_start(self, station_id: str) -> str:
+        return self._topic(self.WORKORDER_START, station_id)
 
-    @staticmethod
-    def workorder_start(station_id: str) -> str:
-        return MQTTTopics._topic(MQTTTopics.WORKORDER_START, station_id)
+    def workorder_done(self, station_id: str) -> str:
+        return self._topic(self.WORKORDER_DONE, station_id)
 
-    @staticmethod
-    def workorder_done(station_id: str) -> str:
-        return MQTTTopics._topic(MQTTTopics.WORKORDER_DONE, station_id)
+    def override(self, station_id: str) -> str:
+        return self._topic(self.OVERRIDE, station_id)
 
-    @staticmethod
-    def override(station_id: str) -> str:
-        return MQTTTopics._topic(MQTTTopics.OVERRIDE, station_id)
+    def heartbeat(self, station_id: str) -> str:
+        return self._topic(self.HEARTBEAT, station_id)
 
-    @staticmethod
-    def heartbeat(station_id: str) -> str:
-        return MQTTTopics._topic(MQTTTopics.HEARTBEAT, station_id)
+    def sync_queue(self, station_id: str) -> str:
+        return self._topic(self.SYNC_QUEUE, station_id)
 
-    @staticmethod
-    def sync_queue(station_id: str) -> str:
-        return MQTTTopics._topic(MQTTTopics.SYNC_QUEUE, station_id)
-
-    @staticmethod
-    def detection(station_id: str) -> str:
-        return MQTTTopics._topic(MQTTTopics.DETECTION, station_id)
+    def detection(self, station_id: str) -> str:
+        return self._topic(self.DETECTION, station_id)

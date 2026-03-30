@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import asyncio
+import hmac
 import json
 import os
 from typing import Any
 
 import aiohttp
 from loguru import logger
+
+MAX_WS_MESSAGE_BYTES = 65536
 
 
 class TabletWebSocketServer:
@@ -38,7 +41,11 @@ class TabletWebSocketServer:
                     await ws.close()
                     return ws
                 data = json.loads(msg.data)
-                if data.get("token") != expected:
+                tok = str(data.get("token", ""))
+                exp = str(expected)
+                if len(tok) != len(exp) or not hmac.compare_digest(
+                    tok.encode("utf-8"), exp.encode("utf-8")
+                ):
                     logger.warning("WebSocket 认证失败：token 不匹配")
                     await ws.close()
                     return ws
@@ -63,6 +70,13 @@ class TabletWebSocketServer:
 
     async def broadcast(self, data: dict[str, Any]) -> None:
         message = json.dumps(data, ensure_ascii=False)
+        if len(message.encode("utf-8")) > MAX_WS_MESSAGE_BYTES:
+            logger.warning(
+                "WebSocket broadcast 消息过大 ({}B > {}B)，已跳过",
+                len(message.encode("utf-8")),
+                MAX_WS_MESSAGE_BYTES,
+            )
+            return
         async with self._clients_lock:
             clients = list(self._clients)
         dead_clients: list[aiohttp.web.WebSocketResponse] = []

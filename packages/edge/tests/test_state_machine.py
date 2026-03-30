@@ -34,6 +34,13 @@ def test_wrong_action(sop_machine):
     assert sop_machine.status == SOPStatus.STEP_NG
 
 
+def test_step_ng_blocks_until_reset_or_override(sop_machine):
+    sop_machine.process_action({"matches_expected": False, "confidence": 0.3})
+    blocked = sop_machine.process_action({"matches_expected": True, "confidence": 0.9})
+    assert blocked["type"] == "blocked"
+    assert "STEP_NG" in blocked["reason"]
+
+
 def test_override(sop_machine):
     result = sop_machine.override("BADGE_001", "AI 误判")
     assert result["event"] == "override_ok"

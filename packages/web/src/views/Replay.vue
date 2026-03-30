@@ -26,7 +26,7 @@ async function loadClips() {
     if (filters.value.sn) params.sn = filters.value.sn;
     if (filters.value.station_code) params.station_code = filters.value.station_code;
     if (filters.value.event_type) params.event_type = filters.value.event_type;
-    if (filters.value.dateRange) {
+    if (filters.value.dateRange?.length === 2) {
       params.date_from = filters.value.dateRange[0];
       params.date_to = filters.value.dateRange[1];
     }

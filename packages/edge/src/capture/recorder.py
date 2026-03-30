@@ -12,6 +12,8 @@ import cv2
 from loguru import logger
 
 DEFAULT_JPEG_QUALITY = 85
+# 约 10 秒 @30fps，防止高分辨率长缓冲占用过多内存
+MAX_BUFFER_FRAMES = 300
 
 
 class VideoRecorder:
@@ -30,7 +32,8 @@ class VideoRecorder:
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self._on_clip_saved = on_clip_saved
-        self._buffer: deque = deque(maxlen=buffer_seconds * fps)
+        _maxlen = min(buffer_seconds * fps, MAX_BUFFER_FRAMES)
+        self._buffer: deque = deque(maxlen=_maxlen)
         self._lock = threading.Lock()
         self._recording_post = False
         self._post_frames: list = []
@@ -41,6 +44,11 @@ class VideoRecorder:
     def feed(self, frame, timestamp: float) -> None:
         saved_path: str | None = None
         with self._lock:
+            if self._buffer.maxlen is None:
+                self._buffer = deque(
+                    self._buffer,
+                    maxlen=min(self.buffer_seconds * self.fps, MAX_BUFFER_FRAMES),
+                )
             self._buffer.append((frame.copy(), timestamp))
             if self._recording_post:
                 self._post_frames.append(frame.copy())

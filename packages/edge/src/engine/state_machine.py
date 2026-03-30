@@ -81,7 +81,12 @@ class SOPStateMachine:
         return None
 
     def process_action(self, action_result: dict) -> dict:
-        if self.status not in (SOPStatus.RUNNING, SOPStatus.STEP_OK, SOPStatus.STEP_NG):
+        if self.status == SOPStatus.STEP_NG:
+            return {
+                "type": "blocked",
+                "reason": "STEP_NG 需要 reset 或 override 后才能继续",
+            }
+        if self.status not in (SOPStatus.RUNNING, SOPStatus.STEP_OK):
             return {"event": "ignored", "message": f"当前状态 {self.status.value} 不接受动作（超时请先 override 或 reset）"}
         current_step = self.get_current_step()
         if not current_step:

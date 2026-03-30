@@ -27,6 +27,20 @@ class ModelSpec:
     minio_key: str | None
 
 
+def _version_tuple(version_str: str) -> tuple[int, ...]:
+    """将版本号拆为数字元组，供语义化版本比较。"""
+    parts: list[int] = []
+    for p in version_str.strip().split("."):
+        p = p.strip()
+        if not p:
+            continue
+        try:
+            parts.append(int(p))
+        except ValueError:
+            raise RuntimeError(f"无效的版本号片段（需为整数）: {version_str!r}") from None
+    return tuple(parts) if parts else (0,)
+
+
 class ModelManager:
 
     def __init__(self, repo_root: Path | None = None, models_root: Path | None = None) -> None:
@@ -78,6 +92,10 @@ class ModelManager:
         spec = self.get_spec(model_key)
         if app_version:
             logger.info("模型 {} 要求应用版本 >= {}，当前 {}", spec.key, spec.min_code_version, app_version)
+            if _version_tuple(app_version) < _version_tuple(spec.min_code_version):
+                raise RuntimeError(
+                    f"应用版本 {app_version!r} 低于模型要求的 min_code_version {spec.min_code_version!r}"
+                )
         target = self.resolved_path(model_key)
         target.parent.mkdir(parents=True, exist_ok=True)
 

@@ -4,6 +4,7 @@ import { ElMessage, ElMessageBox } from "element-plus";
 import { ArrowDown, ArrowUp } from "@element-plus/icons-vue";
 import { sopApi, type SOPTemplate } from "@/api/sop";
 import { parseErrorMsg } from "@/utils/httpError";
+import { formatDateTime } from "@/utils/date";
 
 interface SOPStep {
   /** 仅用于列表渲染，不提交到 API */
@@ -82,11 +83,6 @@ const previewSteps = computed(() => {
   if (!t) return [];
   return t.steps.map((s) => normalizeStep(s as Record<string, unknown>));
 });
-
-function formatDateTime(iso: string): string {
-  const d = new Date(iso);
-  return Number.isNaN(d.getTime()) ? iso : d.toLocaleString("zh-CN");
-}
 
 function requiredObjectsInputValue(step: SOPStep): string {
   return step.required_objects.join(", ");

@@ -52,6 +52,10 @@ class StorageService:
             logger.warning("MinIO bucket 检查失败（服务可能未就绪）: {}", e)
 
     def get_presigned_url(self, bucket: str, object_name: str, expires: int = 3600) -> str:
+        """生成 GET 预签名 URL。
+
+        注意：预签名 URL 在生成时不校验对象是否存在于桶内；客户端请求时若对象不存在将收到 404，需自行处理。
+        """
         return self.client.presigned_get_object(bucket, object_name, expires=timedelta(seconds=expires))
 
     def object_exists(self, bucket: str, object_name: str) -> bool:

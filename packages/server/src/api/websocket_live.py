@@ -59,6 +59,9 @@ async def websocket_live(websocket: WebSocket, station_id: str):
     try:
         while True:
             data = await websocket.receive_text()
+            if len(data) > 4096:
+                logger.warning("消息过长已忽略: station={}, len={}", station_id, len(data))
+                continue
             try:
                 msg = json.loads(data)
             except json.JSONDecodeError:
