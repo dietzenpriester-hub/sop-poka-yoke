@@ -71,7 +71,7 @@ def _try_init_vlm():
         from src.inference.vlm_recognizer import VLMClient
         vlm = VLMClient(
             base_url=os.environ.get("SOP_OLLAMA_URL", "http://localhost:11434"),
-            model=os.environ.get("SOP_VLM_MODEL", "qwen2.5-vl:3b"),
+            model=os.environ.get("SOP_VLM_MODEL", "qwen2.5-vl:7b"),
         )
         warmup_frame = np.zeros((100, 100, 3), dtype=np.uint8)
         result = vlm.classify_action([warmup_frame], {"steps": [{"name": "warmup"}], "current_step_index": 0})

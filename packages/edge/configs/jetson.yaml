@@ -6,4 +6,4 @@ yolo:
   device: "cuda:0"
 
 vlm:
-  model: "qwen2.5-vl:3b"
+  model: "qwen2.5-vl:7b"

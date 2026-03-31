@@ -265,7 +265,7 @@ mkdir -p models/
 
 # VLM (Ollama)
 curl -fsSL https://ollama.com/install.sh | sh
-ollama pull qwen2.5-vl:3b
+ollama pull qwen2.5-vl:7b
 ```
 
 ### 6.4 配置边缘端
@@ -282,7 +282,7 @@ SOP_MINIO_ACCESS_KEY=minioadmin
 SOP_MINIO_SECRET_KEY=<与服务器一致>
 SOP_API_BASE=http://10.10.10.100:8000
 SOP_OLLAMA_URL=http://localhost:11434
-SOP_VLM_MODEL=qwen2.5-vl:3b
+SOP_VLM_MODEL=qwen2.5-vl:7b
 SOP_YOLO_MODEL=yolo11n.pt
 EOF
 ```

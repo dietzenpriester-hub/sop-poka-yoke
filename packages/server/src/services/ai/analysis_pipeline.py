@@ -166,8 +166,10 @@ class AnalysisPipeline:
         if raw_steps:
             steps = await self.vlm_service.refine_steps(raw_steps, process_name, overview)
         else:
-            logger.warning("VLM 未识别出任何步骤，将基于 YOLO 检测结果生成基础步骤")
-            steps = self._fallback_steps_from_yolo(yolo_results, extraction, process_name)
+            logger.warning("VLM 未识别出任何步骤，尝试用概览+YOLO 生成步骤")
+            steps = await self._fallback_steps_with_overview(
+                overview, yolo_results, extraction, process_name,
+            )
 
         await _report(1.0, "分析完成", {
             "current_phase": 4, "total_phases": 4,
@@ -202,13 +204,59 @@ class AnalysisPipeline:
             None, client.fget_object, bucket, object_name, local_path,
         )
 
+    async def _fallback_steps_with_overview(
+        self,
+        overview: str,
+        yolo_results: list,
+        extraction,
+        process_name: str,
+    ) -> list[dict]:
+        """用 VLM 概览 + YOLO 检测结果请求 VLM 生成结构化步骤（纯文本模式，不传图片）。"""
+        all_objects: set[str] = set()
+        for fd in yolo_results:
+            all_objects.update(fd.object_names)
+
+        prompt = (
+            f"你是一个工业 SOP 专家。根据以下信息，为「{process_name}」工序生成操作步骤。\n\n"
+            f"操作概览（来自视频分析）：\n{overview}\n\n"
+        )
+        if all_objects:
+            prompt += f"视频中检测到的物体：{', '.join(sorted(all_objects))}\n\n"
+        prompt += (
+            "请输出 2~6 个操作步骤的 JSON 数组，格式如下：\n"
+            "[\n"
+            '  {"name": "步骤名", "description": "详细描述做什么", '
+            '"action_type": "动作类型", "required_objects": ["需要的物体"], '
+            '"timeout_seconds": 30, "ok_criteria": "合格标准", "ng_criteria": "不合格标准"}\n'
+            "]\n\n"
+            "仅输出 JSON 数组。"
+        )
+
+        try:
+            raw = await self.vlm_service._chat(prompt, [])
+            steps = self.vlm_service._parse_steps_json(raw)
+            if steps:
+                for i, step in enumerate(steps):
+                    step["index"] = i
+                    step.setdefault("timeout_seconds", 30)
+                    step.setdefault("is_optional", False)
+                    step.setdefault("ok_criteria", "")
+                    step.setdefault("ng_criteria", "")
+                    step.setdefault("reference_frame_url", "")
+                logger.info("概览+YOLO 回退生成 {} 个步骤", len(steps))
+                return steps
+        except Exception as e:
+            logger.warning("概览回退也失败: {}", e)
+
+        return self._fallback_steps_from_yolo(yolo_results, extraction, process_name)
+
     @staticmethod
     def _fallback_steps_from_yolo(
         yolo_results: list,
         extraction,
         process_name: str,
     ) -> list[dict]:
-        """当 VLM 无法识别步骤时，基于 YOLO 检测结果生成基础步骤。"""
+        """最终回退：基于 YOLO 物体出现变化生成基础步骤。"""
         object_transitions: list[dict] = []
         prev_objects: set[str] = set()
 

@@ -19,7 +19,7 @@ class VLMService:
     def __init__(
         self,
         ollama_url: str = "http://localhost:11434",
-        model: str = "qwen2.5-vl:3b",
+        model: str = "qwen2.5-vl:7b",
         timeout: float = 120.0,
         max_retries: int = 2,
     ):
@@ -83,57 +83,126 @@ class VLMService:
         overview: str,
         on_batch_progress: Callable[[int, int], Awaitable[None]] | None = None,
     ) -> list[dict]:
-        """分批分析帧序列，识别具体操作步骤并输出结构化 JSON。"""
-        batch_size = 3
-        all_raw_steps: list[dict] = []
-        total_batches = (len(frames) + batch_size - 1) // batch_size
+        """两阶段步骤识别：先用全局视角获取步骤列表，再逐批补充细节。"""
 
-        for batch_idx, batch_start in enumerate(range(0, len(frames), batch_size)):
-            batch_end = min(batch_start + batch_size, len(frames))
-            batch_frames = frames[batch_start:batch_end]
-            batch_timestamps = timestamps[batch_start:batch_end]
-            batch_objects = detected_objects_per_frame[batch_start:batch_end]
+        # --- 阶段 A：全局步骤识别（单次调用，用首/中/尾帧 + 概览） ---
+        sample_indices = [0, len(frames) // 4, len(frames) // 2, 3 * len(frames) // 4, len(frames) - 1]
+        sample_indices = sorted(set(min(i, len(frames) - 1) for i in sample_indices))
+        sample_frames = [frames[i] for i in sample_indices]
+        sample_images = [self._encode_frame(f) for f in sample_frames]
 
-            if on_batch_progress:
-                await on_batch_progress(batch_idx, total_batches)
+        all_objects: set[str] = set()
+        for objs in detected_objects_per_frame:
+            all_objects.update(objs)
 
-            images_b64 = [self._encode_frame(f) for f in batch_frames]
+        global_prompt = (
+            f"这是「{process_name}」工序的操作视频关键帧（按时间顺序）。\n"
+            f"操作概览：{overview}\n"
+        )
+        if all_objects:
+            global_prompt += f"视频中出现的物体：{', '.join(sorted(all_objects))}\n"
+        global_prompt += (
+            "\n请列出这段视频中的操作步骤。\n"
+            "要求：\n"
+            "1. 每个步骤写一行，格式为：步骤编号. 步骤名称 - 详细描述\n"
+            "2. 步骤数量通常在 2~8 个\n"
+            "3. 用简短中文描述\n"
+            "4. 只写步骤列表，不要写其他内容\n\n"
+            "示例：\n"
+            "1. 取物料 - 从料架上取出 PCB 板\n"
+            "2. 定位放置 - 将 PCB 放到治具上对准\n"
+            "3. 拧螺丝 - 用电动螺丝刀拧入 4 颗螺丝\n"
+        )
 
-            obj_desc = ""
-            for i, (ts, objs) in enumerate(zip(batch_timestamps, batch_objects)):
-                if objs:
-                    obj_desc += f"  帧 {batch_start + i + 1} (t={ts:.1f}s): 检测到 {', '.join(objs)}\n"
+        if on_batch_progress:
+            await on_batch_progress(0, 2)
 
-            prompt = (
-                f"工序「{process_name}」的操作视频分析。\n"
-                f"整体概览：{overview}\n\n"
-                f"以下是第 {batch_start + 1}~{batch_end} 帧的截图（按时间顺序）。\n"
+        try:
+            global_raw = await self._chat(global_prompt, sample_images)
+            logger.info("VLM 全局步骤识别原文: {}", global_raw[:500])
+            global_steps = self._parse_text_steps(global_raw, all_objects)
+        except Exception as e:
+            logger.warning("VLM 全局步骤识别失败: {}", e)
+            global_steps = []
+
+        if on_batch_progress:
+            await on_batch_progress(1, 2)
+
+        if not global_steps:
+            logger.warning("VLM 全局步骤识别返回空，尝试 JSON 模式")
+            global_steps = await self._fallback_json_steps(
+                sample_images, process_name, overview, all_objects,
             )
-            if obj_desc:
-                prompt += f"YOLO 目标检测结果：\n{obj_desc}\n"
 
-            prompt += (
-                "请识别这组帧中包含的操作步骤，返回 JSON 数组。\n"
-                "每个步骤格式：\n"
-                '{"name": "步骤名", "description": "详细描述", '
-                '"action_type": "动作类型(pick_up/position/assemble/fasten/inspect/scan/apply/insert/solder/test/pack/label/other)", '
-                '"required_objects": ["物体1", "物体2"], '
-                '"start_time": 起始秒数, "end_time": 结束秒数}\n\n'
-                "规则：\n"
-                "- 如果这组帧中没有明显的新步骤，返回空数组 []\n"
-                "- 步骤名用简短中文\n"
-                "- 仅返回 JSON 数组，不要其他文字"
-            )
+        logger.info("VLM 步骤识别完成: {} 个步骤", len(global_steps))
+        return self._deduplicate_steps(global_steps)
 
-            try:
-                raw = await self._chat(prompt, images_b64)
-                steps = self._parse_steps_json(raw)
-                all_raw_steps.extend(steps)
-                logger.debug("VLM 批次 {}/{}: 识别 {} 个步骤", batch_idx + 1, total_batches, len(steps))
-            except Exception as e:
-                logger.warning("VLM 批次 {}/{} 分析失败: {}", batch_idx + 1, total_batches, e)
+    async def _fallback_json_steps(
+        self,
+        images_b64: list[str],
+        process_name: str,
+        overview: str,
+        all_objects: set[str],
+    ) -> list[dict]:
+        """JSON 格式的备用步骤提取。"""
+        prompt = (
+            f"工序「{process_name}」视频分析。\n"
+            f"概览：{overview}\n"
+        )
+        if all_objects:
+            prompt += f"检测到的物体：{', '.join(sorted(all_objects))}\n"
+        prompt += (
+            "\n请输出操作步骤 JSON 数组：\n"
+            '[{"name": "步骤名", "description": "描述"}]\n'
+            "仅输出 JSON。"
+        )
+        try:
+            raw = await self._chat(prompt, images_b64)
+            return self._parse_steps_json(raw)
+        except Exception as e:
+            logger.warning("VLM JSON 备用模式也失败: {}", e)
+            return []
 
-        return self._deduplicate_steps(all_raw_steps)
+    @staticmethod
+    def _parse_text_steps(raw: str, all_objects: set[str] | None = None) -> list[dict]:
+        """解析自然语言步骤列表（兼容 '1. 步骤名 - 描述' 格式）。"""
+        import re
+        steps = []
+        for line in raw.strip().split("\n"):
+            line = line.strip()
+            if not line:
+                continue
+            m = re.match(r"^(\d+)[.、)\]]\s*(.+)", line)
+            if not m:
+                continue
+            text = m.group(2).strip()
+            if " - " in text:
+                name, desc = text.split(" - ", 1)
+            elif "：" in text:
+                name, desc = text.split("：", 1)
+            elif ":" in text:
+                name, desc = text.split(":", 1)
+            else:
+                name, desc = text, ""
+
+            name = name.strip()
+            desc = desc.strip()
+            if not name:
+                continue
+
+            required_objects = []
+            if all_objects:
+                for obj in all_objects:
+                    if obj.lower() in (name + desc).lower():
+                        required_objects.append(obj)
+
+            steps.append({
+                "name": name,
+                "description": desc,
+                "action_type": "other",
+                "required_objects": required_objects,
+            })
+        return steps
 
     async def refine_steps(
         self,

@@ -71,7 +71,7 @@ else
     echo -e "  ${GREEN}✓${NC} Ollama 已启动"
 fi
 
-VLM_MODEL="${SOP_VLM_MODEL:-qwen2.5vl:3b}"
+VLM_MODEL="${SOP_VLM_MODEL:-qwen2.5vl:7b}"
 if curl -s http://localhost:11434/api/tags | grep -q "${VLM_MODEL%%:*}"; then
     echo -e "  ${GREEN}✓${NC} ${VLM_MODEL} 模型已就绪"
 else
