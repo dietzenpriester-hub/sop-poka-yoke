@@ -3,6 +3,7 @@
 from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from loguru import logger
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.database import get_db
@@ -45,7 +46,30 @@ async def start_workorder(
     db: AsyncSession = Depends(get_db),
     _user: dict = Depends(get_current_user),
 ):
-    return await _svc.create(db, data)
+    wo = await _svc.create(db, data)
+
+    # 创建工单后向边缘端发送 start_workorder 指令
+    if data.station_id:
+        try:
+            from sqlalchemy import select
+            from src.models.station import Station
+            from src.tasks.mqtt_consumer import _mqtt_client
+            from src.core.config import settings
+            import json
+
+            result = await db.execute(select(Station).where(Station.id == data.station_id))
+            station = result.scalar_one_or_none()
+            edge_id = station.edge_device_id if station and station.edge_device_id else str(data.station_id)
+
+            if _mqtt_client:
+                topic = f"{settings.MQTT_TOPIC_PREFIX}/{edge_id}/command"
+                payload = json.dumps({"command": "start_workorder", "work_order_sn": wo.sn})
+                _mqtt_client.publish(topic, payload)
+                logger.info("已向边缘端 {} 发送 start_workorder: {}", edge_id, wo.sn)
+        except Exception as e:
+            logger.warning("发送 start_workorder 指令失败: {}", e)
+
+    return wo
 
 
 @router.get("/{workorder_id}", response_model=WorkOrderResponse)

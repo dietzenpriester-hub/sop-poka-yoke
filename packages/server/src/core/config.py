@@ -31,6 +31,7 @@ class Settings(BaseSettings):
     JWT_ALGORITHM: str = "HS256"
     JWT_EXPIRE_HOURS: int = 24
     DEV_MODE: bool = False
+    EDGE_SECRET: str = "sop-edge-internal-secret"
 
     # AI 分析配置
     OLLAMA_URL: str = "http://localhost:11434"

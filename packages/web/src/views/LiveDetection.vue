@@ -37,6 +37,7 @@ interface SopStatus {
   work_order_sn: string;
   sop_name: string;
   total_steps: number;
+  step_names: string[];
   current_step_index: number;
   current_step_name: string;
   status: string;
@@ -61,6 +62,7 @@ const eventLog = ref<{ time: string; text: string; type: "info" | "success" | "w
 const lastUpdateTime = ref("");
 
 const steps = ref<StepInfo[]>([]);
+let _loadedSopName = "";
 
 function handleWsMessage(data: unknown) {
   const msg = data as Record<string, unknown>;
@@ -78,11 +80,17 @@ function handleWsMessage(data: unknown) {
     if (status.total_steps > 0 && steps.value.length !== status.total_steps) {
       steps.value = Array.from({ length: status.total_steps }, (_, i) => ({
         index: i,
-        name: `步骤 ${i + 1}`,
+        name: status.step_names?.[i] || `步骤 ${i + 1}`,
         status: "pending" as const,
         detection: null,
       }));
+    } else if (status.step_names?.length && status.sop_name !== _loadedSopName) {
+      // SOP 切换时用新的步骤名更新
+      status.step_names.forEach((name, i) => {
+        if (i < steps.value.length) steps.value[i].name = name;
+      });
     }
+    if (status.sop_name) _loadedSopName = status.sop_name;
     for (const s of steps.value) {
       if (s.index < status.current_step_index) {
         if (s.status === "pending" || s.status === "active") s.status = "ok";
@@ -167,6 +175,7 @@ function startMonitoring() {
   steps.value = [];
   sopStatus.value = null;
   snapshotSrc.value = "";
+  _loadedSopName = "";
   addEvent("info", `开始监控工位 ${selectedStationId.value}`);
 }
 

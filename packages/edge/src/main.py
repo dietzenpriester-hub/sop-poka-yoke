@@ -36,28 +36,47 @@ REPO_ROOT = EDGE_ROOT.parent.parent
 
 
 def _load_sop_template() -> dict:
-    """从 Server API 拉取 SOP 模板，失败则使用本地演示模板。"""
+    """从 Server 边缘端专用接口拉取 SOP 模板（共享密钥认证，无需用户登录）。
+
+    模板选取：SOP_TEMPLATE_ID 指定 > 自动选取第一个激活模板。
+    失败时回退到本地演示模板。
+    """
+    import requests
+
     api_base = os.environ.get("SOP_API_BASE", "http://localhost:8000")
+    edge_secret = os.environ.get("SOP_EDGE_SECRET", "sop-edge-internal-secret")
     template_id = os.environ.get("SOP_TEMPLATE_ID", "")
+    headers = {"X-Edge-Secret": edge_secret}
 
-    if template_id:
-        import requests
+    def _fetch(url: str) -> dict | list | None:
         try:
-            url = f"{api_base}/api/sop/{template_id}"
-            headers = {}
-            token = os.environ.get("SOP_API_TOKEN", "")
-            if token:
-                headers["Authorization"] = f"Bearer {token}"
-            resp = requests.get(url, headers=headers, timeout=10)
+            resp = requests.get(url, headers=headers, timeout=10, proxies={"http": None, "https": None})
             if resp.status_code == 200:
-                data = resp.json()
-                logger.info("从 API 加载 SOP 模板: {} (ID={})", data.get("name"), template_id)
-                return data
-            else:
-                logger.warning("API 加载 SOP 模板失败 (HTTP {}), 使用演示模板", resp.status_code)
+                return resp.json()
+            logger.warning("请求失败 (HTTP {}): {}", resp.status_code, url)
         except Exception as e:
-            logger.warning("API 连接失败: {}, 使用演示模板", e)
+            logger.warning("请求异常: {} — {}", url, e)
+        return None
 
+    # 按指定 ID 加载
+    if template_id:
+        data = _fetch(f"{api_base}/api/edge/sop-templates/{template_id}")
+        if data and isinstance(data, dict):
+            logger.info("从 API 加载 SOP 模板: {} (ID={})", data.get("name"), template_id)
+            return data
+        logger.warning("指定模板 ID={} 加载失败，尝试自动选取", template_id)
+
+    # 自动选取第一个激活模板
+    templates = _fetch(f"{api_base}/api/edge/sop-templates")
+    if isinstance(templates, list):
+        if templates:
+            tpl = templates[0]
+            logger.info("自动选取 SOP 模板: {} (ID={})", tpl.get("name"), tpl.get("id"))
+            return tpl
+        logger.warning("服务端无激活 SOP 模板")
+
+    # 兜底演示模板
+    logger.warning("回退至本地演示模板，请确保服务端可访问")
     return {
         "name": "演示 SOP",
         "steps": [
@@ -265,10 +284,52 @@ def main() -> None:
         debounce_seconds=float(os.environ.get("SOP_DEBOUNCE_SEC", "0.5")),
     )
 
-    # 订阅 MQTT override/reset 指令以恢复超时状态
-    def _on_mqtt_command(topic: str, payload: dict):
+    # 后台轮询：IDLE 时每 5 秒查询服务端是否有待处理工单
+    _workorder_queue: Queue = Queue(maxsize=1)
+    _last_polled_sn: list[str] = [""]  # 用列表包装以便闭包内修改
+
+    def _poll_workorder_worker() -> None:
+        import requests as _req
+        api_base = os.environ.get("SOP_API_BASE", "http://localhost:8000")
+        edge_secret = os.environ.get("SOP_EDGE_SECRET", "sop-edge-internal-secret")
+        headers = {"X-Edge-Secret": edge_secret}
+        url = f"{api_base}/api/edge/workorders/active"
+        while True:
+            time.sleep(5)
+            if fsm.status != SOPStatus.IDLE:
+                continue
+            try:
+                resp = _req.get(url, params={"station_id": station_id}, headers=headers, timeout=3,
+                                proxies={"http": None, "https": None})
+                if resp.status_code == 200:
+                    wo = resp.json().get("workorder")
+                    if wo and wo.get("sn") and wo["sn"] != _last_polled_sn[0]:
+                        _last_polled_sn[0] = wo["sn"]
+                        try:
+                            _workorder_queue.put_nowait(wo["sn"])
+                        except Exception:
+                            pass
+            except Exception as _e:
+                logger.debug("轮询工单失败: {}", _e)
+
+    threading.Thread(target=_poll_workorder_worker, daemon=True, name="workorder-poll").start()
+    logger.info("工单轮询线程已启动（间隔 5s，工位={}）", station_id)
+
+    # 订阅 MQTT override/reset/start_workorder 指令
+    def _on_mqtt_command(payload: dict):
         cmd = payload.get("command", "")
-        if cmd == "override":
+        if cmd == "start_workorder":
+            sn = payload.get("work_order_sn", "")
+            if not sn:
+                logger.warning("start_workorder 指令缺少 work_order_sn，忽略")
+                return
+            if fsm.status != SOPStatus.IDLE:
+                logger.warning("当前状态 {} 非 IDLE，无法启动新工单", fsm.status)
+                return
+            fsm.start(sn)
+            logger.info("工单已启动: {}", sn)
+            alerter.alert_warning()
+        elif cmd == "override":
             reason = payload.get("reason", "MQTT 远程放行")
             operator = payload.get("operator_id", "remote")
             result = fsm.override(reason=reason, operator_id=operator)
@@ -285,7 +346,7 @@ def main() -> None:
         logger.info("已订阅命令主题: {}", cmd_topic)
 
     stream.start()
-    fsm.start("DEMO-SN-001")
+    logger.info("边缘端就绪，等待工单启动指令（MQTT command: start_workorder）")
 
     vlm_min_interval = float(os.environ.get("SOP_VLM_INTERVAL", "3.0"))
     mqtt_min_interval = float(os.environ.get("SOP_MQTT_INTERVAL", "1.0"))
@@ -327,6 +388,17 @@ def main() -> None:
 
             frame, ts = item
             mjpeg.update_frame(frame)
+            if fsm.status == SOPStatus.IDLE:
+                # 消费轮询到的工单（非阻塞）
+                try:
+                    polled_sn = _workorder_queue.get_nowait()
+                    logger.info("轮询启动工单: {}", polled_sn)
+                    fsm.start(polled_sn)
+                    alerter.alert_warning()
+                except Empty:
+                    pass
+                recorder.feed(frame, ts)
+                continue
             if fsm.status == SOPStatus.TIMEOUT:
                 recorder.feed(frame, ts)
                 continue
@@ -401,6 +473,7 @@ def main() -> None:
                     "work_order_sn": fsm.work_order_sn or "",
                     "sop_name": getattr(fsm, "template_name", ""),
                     "total_steps": len(fsm.steps),
+                    "step_names": [s.name for s in fsm.steps],
                     "current_step_index": fsm.current_step_index,
                     "current_step_name": cur_step.name if cur_step else "",
                     "status": fsm.status.value if hasattr(fsm.status, "value") else str(fsm.status),
@@ -476,7 +549,8 @@ def main() -> None:
                     )
                 alerter.alert_ok()
                 logger.info("所有 SOP 步骤完成！")
-                break
+                fsm.reset()
+                logger.info("状态机已重置为 IDLE，等待下一个工单")
 
             recorder.feed(frame, ts)
 

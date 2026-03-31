@@ -44,7 +44,7 @@ _STEP_KW_FIELDS = {f.name for f in fields(StepDefinition)} - {"index"}
 
 
 class SOPStateMachine:
-    MIN_CONFIDENCE = 0.6
+    MIN_CONFIDENCE = 0.75
 
     def __init__(self, sop_template: dict, debounce_seconds: float = 0.5) -> None:
         self.template_name = sop_template["name"]

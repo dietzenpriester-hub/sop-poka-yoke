@@ -94,11 +94,13 @@ class VLMClient:
         expected = steps[current].get("name", "未知") if current < len(steps) else "未知"
         expected_desc = steps[current].get("description", "") if current < len(steps) else ""
         return (
-            f"你是 SOP 动作识别专家。当前期望步骤（第{current + 1}步）：{expected}\n"
-            f"描述：{expected_desc}\n\n"
-            "请判断图片中操作员是否在执行这个步骤。\n"
-            '返回 JSON：{{"action": "动作描述", "matches_expected": true/false, "confidence": 0.0-1.0}}\n'
-            "仅返回 JSON。"
+            f"You are an SOP action verification expert.\n"
+            f"Expected step {current + 1}: {expected}\n"
+            f"Description: {expected_desc}\n\n"
+            "Look at the image carefully. Is the operator ACTUALLY performing this specific step right now?\n"
+            "Be strict: only return matches_expected=true if you clearly see the action being done.\n"
+            "Return only valid JSON with these exact keys:\n"
+            '{"action": "<describe what you actually see>", "matches_expected": <true or false>, "confidence": <0.0 to 1.0>}'
         )
 
     def _parse_response(self, content: str) -> dict:
@@ -123,11 +125,20 @@ class VLMClient:
             "raw_response": content[:500],
         }
 
-    @staticmethod
-    def _validate_action_result(data: dict) -> dict:
+    _INVALID_ACTIONS = {"动作描述", "describe what you actually see", "unknown", ""}
+
+    @classmethod
+    def _validate_action_result(cls, data: dict) -> dict:
+        action = str(data.get("action", "unknown")).strip()
+        confidence = min(1.0, max(0.0, float(data.get("confidence", 0.0))))
+        matches = bool(data.get("matches_expected", False))
+        # 模型抄了示例占位文字，说明没有真正分析图像
+        if action in cls._INVALID_ACTIONS:
+            matches = False
+            confidence = 0.0
         return {
-            "action": str(data.get("action", "unknown")),
-            "confidence": min(1.0, max(0.0, float(data.get("confidence", 0.0)))),
-            "matches_expected": bool(data.get("matches_expected", False)),
+            "action": action,
+            "confidence": confidence,
+            "matches_expected": matches,
             "details": str(data.get("details", "")),
         }
