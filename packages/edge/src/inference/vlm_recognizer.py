@@ -1,4 +1,11 @@
-"""多模态大模型推理客户端（通过 Ollama API）"""
+"""多模态大模型推理客户端（通过 Ollama API）
+
+优化策略：
+- 超时 60s 适配 7B 模型本地推理
+- 图片压缩到 480px 降低传输和推理开销
+- keep_alive 保持模型常驻 GPU/内存
+- JPEG 质量 70% 减小 payload
+"""
 
 import base64
 import json
@@ -9,11 +16,17 @@ import httpx
 import numpy as np
 from loguru import logger
 
+_MAX_IMAGE_DIM = 480
+_JPEG_QUALITY = 70
+
 
 class VLMClient:
 
     def __init__(
-        self, base_url: str = "http://localhost:11434", model: str = "qwen2.5-vl:7b", timeout: float = 10.0
+        self,
+        base_url: str = "http://localhost:11434",
+        model: str = "qwen2.5-vl:7b",
+        timeout: float = 60.0,
     ) -> None:
         self.base_url = base_url
         self.model = model
@@ -30,13 +43,14 @@ class VLMClient:
         self.close()
 
     def classify_action(self, frames: list[np.ndarray], sop_context: dict) -> dict:
-        images_b64 = [self._frame_to_base64(f) for f in frames]
+        images_b64 = [self._frame_to_base64(f) for f in frames[-1:]]
         prompt = self._build_prompt(sop_context)
         payload = {
             "model": self.model,
             "messages": [{"role": "user", "content": prompt, "images": images_b64}],
             "stream": False,
             "options": {"temperature": 0.1, "num_predict": 200},
+            "keep_alive": "30m",
         }
         try:
             resp = self.client.post(f"{self.base_url}/api/chat", json=payload)
@@ -49,7 +63,6 @@ class VLMClient:
 
     @staticmethod
     def _extract_message_content(result: dict) -> str:
-        """兼容 Ollama /chat 不同响应结构，避免 KeyError。"""
         msg = result.get("message")
         if isinstance(msg, dict):
             return str(msg.get("content", ""))
@@ -66,28 +79,27 @@ class VLMClient:
                 logger.info("VLM 解析失败，重试 {}/{}", attempt + 1, max_retries)
         return result
 
-    def _frame_to_base64(self, frame: np.ndarray) -> str:
-        _, buffer = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
+    @staticmethod
+    def _frame_to_base64(frame: np.ndarray) -> str:
+        h, w = frame.shape[:2]
+        if max(h, w) > _MAX_IMAGE_DIM:
+            scale = _MAX_IMAGE_DIM / max(h, w)
+            frame = cv2.resize(frame, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_AREA)
+        _, buffer = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, _JPEG_QUALITY])
         return base64.b64encode(buffer).decode("utf-8")
 
     def _build_prompt(self, ctx: dict) -> str:
-        steps_desc = "\n".join(
-            f"  步骤{i + 1}: {s['name']} — {s.get('description', '')}"
-            for i, s in enumerate(ctx.get("steps", []))
-        )
         current = ctx.get("current_step_index", 0)
-        expected = ctx.get("steps", [{}])[current].get("name", "未知") if ctx.get("steps") else "未知"
-        return f"""你是一个工业 SOP 动作识别专家。
-
-当前工序的 SOP 步骤：
-{steps_desc}
-
-当前期望步骤（第 {current + 1} 步）：{expected}
-
-请分析图片中操作员正在执行的动作，返回 JSON 格式：
-{{"action": "具体动作描述", "matches_expected": true/false, "confidence": 0.0-1.0, "details": "补充说明"}}
-
-仅返回 JSON，不要其他内容。"""
+        steps = ctx.get("steps", [])
+        expected = steps[current].get("name", "未知") if current < len(steps) else "未知"
+        expected_desc = steps[current].get("description", "") if current < len(steps) else ""
+        return (
+            f"你是 SOP 动作识别专家。当前期望步骤（第{current + 1}步）：{expected}\n"
+            f"描述：{expected_desc}\n\n"
+            "请判断图片中操作员是否在执行这个步骤。\n"
+            '返回 JSON：{{"action": "动作描述", "matches_expected": true/false, "confidence": 0.0-1.0}}\n'
+            "仅返回 JSON。"
+        )
 
     def _parse_response(self, content: str) -> dict:
         content = content.strip()
@@ -104,7 +116,7 @@ class VLMClient:
                     return self._validate_action_result(parsed)
             except (json.JSONDecodeError, ValueError):
                 continue
-        logger.warning("VLM 响应解析失败，触发人工介入标记: {}", content[:200])
+        logger.warning("VLM 响应解析失败: {}", content[:200])
         return {
             "action": "parse_failed", "confidence": 0.0,
             "matches_expected": False, "needs_human_review": True,

@@ -34,7 +34,28 @@ REPO_ROOT = EDGE_ROOT.parent.parent
 
 
 def _load_sop_template() -> dict:
-    """实际项目从 Redis/SQLite/HTTP 拉取；此处占位。"""
+    """从 Server API 拉取 SOP 模板，失败则使用本地演示模板。"""
+    api_base = os.environ.get("SOP_API_BASE", "http://localhost:8000")
+    template_id = os.environ.get("SOP_TEMPLATE_ID", "")
+
+    if template_id:
+        import requests
+        try:
+            url = f"{api_base}/api/sop/{template_id}"
+            headers = {}
+            token = os.environ.get("SOP_API_TOKEN", "")
+            if token:
+                headers["Authorization"] = f"Bearer {token}"
+            resp = requests.get(url, headers=headers, timeout=10)
+            if resp.status_code == 200:
+                data = resp.json()
+                logger.info("从 API 加载 SOP 模板: {} (ID={})", data.get("name"), template_id)
+                return data
+            else:
+                logger.warning("API 加载 SOP 模板失败 (HTTP {}), 使用演示模板", resp.status_code)
+        except Exception as e:
+            logger.warning("API 连接失败: {}, 使用演示模板", e)
+
     return {
         "name": "演示 SOP",
         "steps": [
@@ -236,7 +257,11 @@ def main() -> None:
     stream.start()
     fsm.start("DEMO-SN-001")
 
+    vlm_min_interval = float(os.environ.get("SOP_VLM_INTERVAL", "3.0"))
+    last_vlm_submit_time = 0.0
+
     logger.info("═══ 开始实时检测循环 ═══")
+    logger.info("  VLM 最小间隔: {}s", vlm_min_interval)
     detect_count = 0
 
     try:
@@ -294,24 +319,29 @@ def main() -> None:
                 "unique_classes": list(set(det_classes)),
             })
 
-            # VLM 异步推理：提交请求到独立线程
+            # VLM 异步推理：节流控制，避免每帧都提交
             if vlm_worker:
-                vlm_worker.submit(
-                    [frame],
-                    {
-                        "steps": [
-                            {"name": s.name, "description": s.description,
-                             "required_objects": s.required_objects,
-                             "action_type": s.action_type,
-                             "timeout_seconds": s.timeout_seconds,
-                             "is_optional": s.is_optional}
-                            for s in fsm.steps
-                        ],
-                        "current_step_index": fsm.current_step_index,
-                    },
-                )
+                now = time.monotonic()
+                if now - last_vlm_submit_time >= vlm_min_interval:
+                    vlm_worker.submit(
+                        [frame],
+                        {
+                            "steps": [
+                                {"name": s.name, "description": s.description,
+                                 "required_objects": s.required_objects,
+                                 "action_type": s.action_type,
+                                 "timeout_seconds": s.timeout_seconds,
+                                 "is_optional": s.is_optional}
+                                for s in fsm.steps
+                            ],
+                            "current_step_index": fsm.current_step_index,
+                        },
+                    )
+                    last_vlm_submit_time = now
                 action = vlm_worker.poll_result()
                 if action is not None:
+                    logger.info("VLM 动作识别: {} (conf={:.2f})",
+                                action.get("action", "?"), action.get("confidence", 0))
                     result = fsm.process_action(action)
                 else:
                     result = {"event": "vlm_pending"}

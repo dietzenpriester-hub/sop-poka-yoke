@@ -20,8 +20,8 @@ class VLMService:
         self,
         ollama_url: str = "http://localhost:11434",
         model: str = "qwen2.5-vl:7b",
-        timeout: float = 120.0,
-        max_retries: int = 2,
+        timeout: float = 300.0,
+        max_retries: int = 3,
     ):
         self.ollama_url = ollama_url.rstrip("/")
         self.model = model
@@ -85,9 +85,14 @@ class VLMService:
     ) -> list[dict]:
         """两阶段步骤识别：先用全局视角获取步骤列表，再逐批补充细节。"""
 
-        # --- 阶段 A：全局步骤识别（单次调用，用首/中/尾帧 + 概览） ---
-        sample_indices = [0, len(frames) // 4, len(frames) // 2, 3 * len(frames) // 4, len(frames) - 1]
-        sample_indices = sorted(set(min(i, len(frames) - 1) for i in sample_indices))
+        # --- 阶段 A：全局步骤识别 ---
+        # 均匀采样最多 8 帧，确保覆盖视频全程
+        n_samples = min(8, len(frames))
+        if n_samples <= 1:
+            sample_indices = [0]
+        else:
+            sample_indices = [round(i * (len(frames) - 1) / (n_samples - 1)) for i in range(n_samples)]
+        sample_indices = sorted(set(sample_indices))
         sample_frames = [frames[i] for i in sample_indices]
         sample_images = [self._encode_frame(f) for f in sample_frames]
 
@@ -96,22 +101,29 @@ class VLMService:
             all_objects.update(objs)
 
         global_prompt = (
-            f"这是「{process_name}」工序的操作视频关键帧（按时间顺序）。\n"
+            f"这是「{process_name}」工序的操作视频，共 {len(sample_indices)} 张关键帧截图（按时间顺序排列）。\n"
             f"操作概览：{overview}\n"
         )
         if all_objects:
             global_prompt += f"视频中出现的物体：{', '.join(sorted(all_objects))}\n"
         global_prompt += (
-            "\n请列出这段视频中的操作步骤。\n"
+            "\n请仔细观察每一帧画面之间的变化，尽可能详细地列出所有操作步骤。\n"
             "要求：\n"
             "1. 每个步骤写一行，格式为：步骤编号. 步骤名称 - 详细描述\n"
-            "2. 步骤数量通常在 2~8 个\n"
-            "3. 用简短中文描述\n"
-            "4. 只写步骤列表，不要写其他内容\n\n"
+            "2. 每个独立的动作都应该作为一个单独的步骤\n"
+            "3. 把每一帧中看到的新动作或状态变化都列为步骤\n"
+            "4. 包含准备、取料、操作、放置、检查等各个阶段\n"
+            "5. 用简短中文描述\n"
+            "6. 只写步骤列表，不要写其他内容\n\n"
             "示例：\n"
-            "1. 取物料 - 从料架上取出 PCB 板\n"
-            "2. 定位放置 - 将 PCB 放到治具上对准\n"
-            "3. 拧螺丝 - 用电动螺丝刀拧入 4 颗螺丝\n"
+            "1. 准备工位 - 检查工位清洁度，确认工具齐全\n"
+            "2. 取出物料 - 从料盒中取出 PCB 板\n"
+            "3. 定位放置 - 将 PCB 放到治具上对准定位孔\n"
+            "4. 拿取工具 - 从工具架拿起电动螺丝刀\n"
+            "5. 拧第一颗螺丝 - 对准螺丝孔拧入螺丝并拧紧\n"
+            "6. 拧第二颗螺丝 - 移到第二个螺丝孔拧入并拧紧\n"
+            "7. 放回工具 - 将螺丝刀放回工具架\n"
+            "8. 目视检查 - 确认所有螺丝是否拧紧到位\n"
         )
 
         if on_batch_progress:
@@ -217,11 +229,12 @@ class VLMService:
             f"```json\n{steps_json}\n```\n\n"
             f"整体概览：{overview}\n\n"
             "请优化这些步骤：\n"
-            "1. 合并重复或过于相似的步骤\n"
-            "2. 补充缺失的判定标准 ok_criteria 和 ng_criteria\n"
-            "3. 为每个步骤添加合理的 timeout_seconds（秒）\n"
-            "4. 标记可选步骤 is_optional: true/false\n"
-            "5. 确保步骤顺序合理\n\n"
+            "1. 补充缺失的判定标准 ok_criteria 和 ng_criteria\n"
+            "2. 为每个步骤添加合理的 timeout_seconds（秒）\n"
+            "3. 标记可选步骤 is_optional: true/false\n"
+            "4. 确保步骤顺序合理\n"
+            "5. 如果概览中提到了额外的操作阶段但步骤中没有，请补充\n\n"
+            "重要：不要合并现有步骤，保留所有已识别的步骤。\n\n"
             "输出格式（JSON 数组）：\n"
             '[{"index": 0, "name": "步骤名", "description": "描述", '
             '"action_type": "类型", "required_objects": ["..."], '

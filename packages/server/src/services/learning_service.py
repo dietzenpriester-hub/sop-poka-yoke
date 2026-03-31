@@ -48,7 +48,7 @@ class LearningService:
             try:
                 await self._run_analysis(task_id, db)
             except Exception as e:
-                logger.error("分析任务失败 {}: {}", task_id, e)
+                logger.exception("分析任务失败 {}: {}", task_id, e)
                 result = await db.execute(select(LearningTask).where(LearningTask.task_id == task_id))
                 task = result.scalar_one_or_none()
                 if task:
