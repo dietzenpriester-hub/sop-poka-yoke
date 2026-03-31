@@ -15,7 +15,7 @@ class KeyframeExtractor:
     @staticmethod
     def _make_bg_subtractor():
         return cv2.createBackgroundSubtractorMOG2(
-            history=500, varThreshold=50, detectShadows=False
+            history=200, varThreshold=50, detectShadows=False
         )
 
     def is_keyframe(self, frame: np.ndarray) -> bool:
@@ -23,7 +23,7 @@ class KeyframeExtractor:
             gray = frame if frame.ndim == 2 else frame[:, :, 0]
         else:
             gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        gray = cv2.GaussianBlur(gray, (21, 21), 0)
+        gray = cv2.GaussianBlur(gray, (11, 11), 0)
 
         if self._prev_gray is not None:
             diff = cv2.absdiff(self._prev_gray, gray)

@@ -18,35 +18,27 @@ class ReportService:
     ) -> dict[str, Any]:
         since = datetime.now(timezone.utc) - timedelta(days=days)
 
-        total_orders = (
+        order_row = (
             await db.execute(
-                select(func.count(WorkOrder.id)).where(WorkOrder.start_time >= since)
+                select(
+                    func.count(WorkOrder.id).label("total"),
+                    func.count(WorkOrder.id).filter(WorkOrder.status == "done").label("done"),
+                ).where(WorkOrder.start_time >= since)
             )
-        ).scalar_one()
+        ).one()
+        total_orders = order_row.total
+        done_orders = order_row.done
 
-        done_orders = (
+        step_row = (
             await db.execute(
-                select(func.count(WorkOrder.id)).where(
-                    WorkOrder.start_time >= since, WorkOrder.status == "done"
-                )
+                select(
+                    func.count(StepRecord.id).filter(StepRecord.result == "OK").label("ok"),
+                    func.count(StepRecord.id).filter(StepRecord.result == "NG").label("ng"),
+                ).where(StepRecord.created_at >= since)
             )
-        ).scalar_one()
-
-        ng_count = (
-            await db.execute(
-                select(func.count(StepRecord.id)).where(
-                    StepRecord.created_at >= since, StepRecord.result == "NG"
-                )
-            )
-        ).scalar_one()
-
-        ok_count = (
-            await db.execute(
-                select(func.count(StepRecord.id)).where(
-                    StepRecord.created_at >= since, StepRecord.result == "OK"
-                )
-            )
-        ).scalar_one()
+        ).one()
+        ok_count = step_row.ok
+        ng_count = step_row.ng
 
         total_steps = ok_count + ng_count
         ok_rate = round(ok_count / total_steps * 100, 2) if total_steps > 0 else 0.0

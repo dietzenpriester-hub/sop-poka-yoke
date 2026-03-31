@@ -8,12 +8,20 @@ export function useECharts(): {
 } {
   const chartRef = ref<HTMLDivElement>();
   let chart: echarts.ECharts | null = null;
+  let listening = false;
+
+  const resize = () => {
+    chart?.resize();
+  };
 
   const ensure = () => {
     if (!chartRef.value) return;
     if (!chart) {
       chart = echarts.init(chartRef.value);
+    }
+    if (!listening) {
       window.addEventListener("resize", resize);
+      listening = true;
     }
   };
 
@@ -22,12 +30,11 @@ export function useECharts(): {
     chart?.setOption(option, true);
   };
 
-  const resize = () => {
-    chart?.resize();
-  };
-
   onUnmounted(() => {
-    window.removeEventListener("resize", resize);
+    if (listening) {
+      window.removeEventListener("resize", resize);
+      listening = false;
+    }
     chart?.dispose();
     chart = null;
   });

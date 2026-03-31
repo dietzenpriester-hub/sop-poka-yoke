@@ -129,14 +129,21 @@ async function refreshDetailIfOpen() {
   await loadTaskDetail(currentTask.value.task_id);
 }
 
+let _pollInFlight = false;
 function startPolling() {
   if (pollTimer) return;
   pollTimer = setInterval(() => {
+    if (_pollInFlight) return;
+    _pollInFlight = true;
     void (async () => {
-      await loadTasks(false);
-      await refreshDetailIfOpen();
+      try {
+        await loadTasks(false);
+        await refreshDetailIfOpen();
+      } finally {
+        _pollInFlight = false;
+      }
     })();
-  }, 2000);
+  }, 5000);
 }
 
 function stopPolling() {

@@ -18,6 +18,7 @@ import {
   Fold,
   Delete,
   SwitchButton,
+  Aim,
 } from "@element-plus/icons-vue";
 import { alertApi } from "@/api/alert";
 import { useAuthStore } from "@/stores/auth";
@@ -39,6 +40,7 @@ type MenuItem = {
 
 const allMenuItems: MenuItem[] = [
   { path: "/", label: "实时监控", icon: Monitor },
+  { path: "/live", label: "作业检测", icon: Aim },
   { path: "/sop", label: "SOP 配置", icon: Setting },
   { path: "/learning", label: "标准学习", icon: Reading },
   { path: "/stations", label: "工位管理", icon: Platform },

@@ -12,6 +12,8 @@ from src.core.config import settings
 
 _mqtt_client: mqtt.Client | None = None
 _mqtt_thread: threading.Thread | None = None
+_station_cache: dict[str, int | None] = {}
+_STATION_CACHE_MAX = 200
 
 
 def _parse_topic(topic: str) -> tuple[str | None, str | None]:
@@ -44,14 +46,22 @@ async def _handle_alert(station_id: str, payload: dict) -> None:
                 step_index=payload.get("step_index", 0),
                 video_url=payload.get("video_url", ""),
             )
-            st_r = await session.execute(
-                select(Station).where(
-                    or_(Station.edge_device_id == station_id, Station.name == station_id),
-                ).limit(1),
-            )
-            station_row = st_r.scalar_one_or_none()
-            if station_row is not None:
-                alert.station_id = station_row.id
+            if station_id in _station_cache:
+                cached_sid = _station_cache[station_id]
+                if cached_sid is not None:
+                    alert.station_id = cached_sid
+            else:
+                st_r = await session.execute(
+                    select(Station).where(
+                        or_(Station.edge_device_id == station_id, Station.name == station_id),
+                    ).limit(1),
+                )
+                station_row = st_r.scalar_one_or_none()
+                if len(_station_cache) >= _STATION_CACHE_MAX:
+                    _station_cache.clear()
+                _station_cache[station_id] = station_row.id if station_row else None
+                if station_row is not None:
+                    alert.station_id = station_row.id
             session.add(alert)
             await session.commit()
             await session.refresh(alert)

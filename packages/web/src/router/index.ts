@@ -8,6 +8,7 @@ const router = createRouter({
   routes: [
     { path: "/login", name: "login", component: () => import("@/views/Login.vue"), meta: { public: true } },
     { path: "/", name: "dashboard", component: () => import("@/views/Dashboard.vue") },
+    { path: "/live", name: "live", component: () => import("@/views/LiveDetection.vue") },
     { path: "/sop", name: "sop", component: () => import("@/views/SOPConfig.vue") },
     { path: "/learning", name: "learning", component: () => import("@/views/SOPLearning.vue") },
     { path: "/alerts", name: "alerts", component: () => import("@/views/AlertList.vue") },

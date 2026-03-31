@@ -36,6 +36,6 @@ class StepRecord(Base):
     snapshot_url = Column(String(512), default="")
     video_url = Column(String(512), default="")
     detail = Column(JSON, default=dict)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
 
     workorder = relationship("WorkOrder", back_populates="step_records")

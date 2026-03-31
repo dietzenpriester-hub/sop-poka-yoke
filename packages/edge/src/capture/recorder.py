@@ -49,9 +49,10 @@ class VideoRecorder:
                     self._buffer,
                     maxlen=min(self.buffer_seconds * self.fps, MAX_BUFFER_FRAMES),
                 )
-            self._buffer.append((frame.copy(), timestamp))
+            snapshot = frame.copy()
+            self._buffer.append((snapshot, timestamp))
             if self._recording_post:
-                self._post_frames.append(frame.copy())
+                self._post_frames.append(snapshot)
                 self._post_count += 1
                 if self._post_count >= self._post_target:
                     saved_path = self._do_save_clip()

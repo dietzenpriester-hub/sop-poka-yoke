@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import base64
 import dataclasses
 import json
 import os
@@ -16,6 +17,7 @@ import time
 from pathlib import Path
 from queue import Empty, Queue
 
+import cv2
 import numpy as np
 from loguru import logger
 
@@ -198,18 +200,40 @@ def main() -> None:
     vlm_worker = _VLMWorker(vlm) if vlm else None
     alerter = _try_init_modbus()
 
-    mqtt_client = MQTTClient(broker=mqtt_broker, port=mqtt_port, client_id=f"edge-{station_id}")
+    import uuid
+    mqtt_uid = uuid.uuid4().hex[:8]
+    mqtt_client = MQTTClient(broker=mqtt_broker, port=mqtt_port, client_id=f"edge-{station_id}-{mqtt_uid}")
     try:
         mqtt_client.connect()
     except Exception as e:
         logger.error("MQTT 连接失败: {}（检测结果将只记录日志）", e)
         mqtt_client = None
 
+    _SNAPSHOT_MAX_DIM = 320
+    _SNAPSHOT_QUALITY = 50
+
+    def _encode_snapshot(frame: np.ndarray) -> str:
+        """将帧压缩为小尺寸 base64 JPEG，用于前端实时预览。"""
+        h, w = frame.shape[:2]
+        if max(h, w) > _SNAPSHOT_MAX_DIM:
+            scale = _SNAPSHOT_MAX_DIM / max(h, w)
+            frame = cv2.resize(frame, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_AREA)
+        ok, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, _SNAPSHOT_QUALITY])
+        return base64.b64encode(buf).decode("ascii") if ok else ""
+
     def send_detection(payload: dict) -> None:
         topic = f"{mqtt_prefix}/{station_id}/detection"
         if mqtt_client:
             mqtt_client.publish(topic, payload)
-        logger.info("[检测] {}", json.dumps(payload, ensure_ascii=False)[:200])
+        log_payload = {k: v for k, v in payload.items() if k != "snapshot"}
+        logger.info("[检测] {}", json.dumps(log_payload, ensure_ascii=False)[:200])
+
+    def send_status(payload: dict) -> None:
+        topic = f"{mqtt_prefix}/{station_id}/status"
+        if mqtt_client:
+            mqtt_client.publish(topic, payload)
+        log_payload = {k: v for k, v in payload.items() if k != "snapshot"}
+        logger.info("[状态] {}", json.dumps(log_payload, ensure_ascii=False)[:200])
 
     def send_alert(payload: dict) -> None:
         topic = f"{mqtt_prefix}/{station_id}/alert/raise"
@@ -258,10 +282,12 @@ def main() -> None:
     fsm.start("DEMO-SN-001")
 
     vlm_min_interval = float(os.environ.get("SOP_VLM_INTERVAL", "3.0"))
+    mqtt_min_interval = float(os.environ.get("SOP_MQTT_INTERVAL", "1.0"))
     last_vlm_submit_time = 0.0
+    last_mqtt_send_time = 0.0
 
     logger.info("═══ 开始实时检测循环 ═══")
-    logger.info("  VLM 最小间隔: {}s", vlm_min_interval)
+    logger.info("  VLM 最小间隔: {}s, MQTT 最小间隔: {}s", vlm_min_interval, mqtt_min_interval)
     detect_count = 0
 
     try:
@@ -310,19 +336,14 @@ def main() -> None:
             det_classes = [
                 d.get("class_name", d.get("label", "")) for d in det_dicts
             ] if det_dicts else []
-            send_detection({
-                "station_id": station_id,
-                "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
-                "detect_count": detect_count,
-                "detections": det_dicts,
-                "object_count": len(det_dicts),
-                "unique_classes": list(set(det_classes)),
-            })
 
             # VLM 异步推理：节流控制，避免每帧都提交
+            vlm_action_text = ""
+            vlm_confidence = 0.0
+            vlm_matches = False
             if vlm_worker:
-                now = time.monotonic()
-                if now - last_vlm_submit_time >= vlm_min_interval:
+                now_vlm = time.monotonic()
+                if now_vlm - last_vlm_submit_time >= vlm_min_interval:
                     vlm_worker.submit(
                         [frame],
                         {
@@ -337,16 +358,53 @@ def main() -> None:
                             "current_step_index": fsm.current_step_index,
                         },
                     )
-                    last_vlm_submit_time = now
+                    last_vlm_submit_time = now_vlm
                 action = vlm_worker.poll_result()
                 if action is not None:
+                    vlm_action_text = action.get("action", "")
+                    vlm_confidence = float(action.get("confidence", 0))
+                    vlm_matches = bool(action.get("matches_expected", False))
                     logger.info("VLM 动作识别: {} (conf={:.2f})",
-                                action.get("action", "?"), action.get("confidence", 0))
+                                vlm_action_text, vlm_confidence)
                     result = fsm.process_action(action)
                 else:
                     result = {"event": "vlm_pending"}
             else:
                 result = {"event": "yolo_only"}
+
+            # MQTT 消息节流：限制发送频率避免压垮 broker
+            now_mqtt = time.monotonic()
+            is_important = result.get("event") in ("step_ok", "step_ng", "complete", "override_ok")
+            if is_important or (now_mqtt - last_mqtt_send_time >= mqtt_min_interval):
+                snapshot_b64 = _encode_snapshot(frame)
+                send_detection({
+                    "station_id": station_id,
+                    "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+                    "detect_count": detect_count,
+                    "detections": det_dicts,
+                    "object_count": len(det_dicts),
+                    "unique_classes": list(set(det_classes)),
+                    "snapshot": snapshot_b64,
+                })
+                cur_step = fsm.get_current_step()
+                send_status({
+                    "type": "sop_status",
+                    "station_id": station_id,
+                    "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+                    "work_order_sn": fsm.work_order_sn or "",
+                    "sop_name": getattr(fsm, "template_name", ""),
+                    "total_steps": len(fsm.steps),
+                    "current_step_index": fsm.current_step_index,
+                    "current_step_name": cur_step.name if cur_step else "",
+                    "status": fsm.status.value if hasattr(fsm.status, "value") else str(fsm.status),
+                    "event": result.get("event", ""),
+                    "vlm_action": vlm_action_text,
+                    "vlm_confidence": vlm_confidence,
+                    "vlm_matches": vlm_matches,
+                    "yolo_objects": list(set(det_classes)),
+                    "snapshot": snapshot_b64,
+                })
+                last_mqtt_send_time = now_mqtt
 
             if result.get("type") == "blocked":
                 logger.debug("状态机已阻塞: {}", result.get("reason", ""))

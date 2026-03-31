@@ -19,7 +19,6 @@ from minio import Minio
 if TYPE_CHECKING:
     from src.storage.sqlite_store import SQLiteStore
 
-QUEUE_POLL_INTERVAL_SEC = 0.05
 MAX_SEND_RETRIES = 5
 
 
@@ -96,12 +95,14 @@ class OfflineDataSync:
         self._lock = threading.Lock()
         self._seq = 0
         self._stop = threading.Event()
+        self._has_data = threading.Event()
         self._thread: threading.Thread | None = None
 
     def enqueue(self, priority: Priority, payload: dict[str, Any]) -> None:
         with self._lock:
             self._seq += 1
             heapq.heappush(self._queue, SyncTask(priority=int(priority), seq=self._seq, payload=payload))
+        self._has_data.set()
         logger.debug("入队补传任务 priority={} payload_keys={}", priority.name, list(payload))
 
     def start_worker(self) -> None:
@@ -118,11 +119,12 @@ class OfflineDataSync:
         while not self._stop.is_set():
             task = self._pop_task()
             if task is None:
-                time.sleep(QUEUE_POLL_INTERVAL_SEC)
+                self._has_data.wait(timeout=2.0)
+                self._has_data.clear()
                 continue
             try:
                 if task.priority == Priority.P3:
-                    time.sleep(QUEUE_POLL_INTERVAL_SEC)
+                    time.sleep(0.05)
                 self._sender(task.payload)
             except Exception as e:
                 retries = getattr(task, "_retries", 0) + 1

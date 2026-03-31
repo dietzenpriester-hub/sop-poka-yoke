@@ -2,7 +2,7 @@
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.database import get_db
@@ -156,10 +156,11 @@ async def batch_acknowledge(
     """批量确认报警。"""
     alert_ids = body.alert_ids
     result = await db.execute(
-        select(AlertEvent).where(AlertEvent.id.in_(alert_ids), AlertEvent.acknowledged == "0")
+        update(AlertEvent)
+        .where(AlertEvent.id.in_(alert_ids), AlertEvent.acknowledged == "0")
+        .values(acknowledged="1")
+        .returning(AlertEvent.id)
     )
-    alerts = list(result.scalars().all())
-    for alert in alerts:
-        alert.acknowledged = "1"
+    updated_ids = [row[0] for row in result.fetchall()]
     await db.commit()
-    return {"message": f"已确认 {len(alerts)} 条报警", "acknowledged_ids": [a.id for a in alerts]}
+    return {"message": f"已确认 {len(updated_ids)} 条报警", "acknowledged_ids": updated_ids}
