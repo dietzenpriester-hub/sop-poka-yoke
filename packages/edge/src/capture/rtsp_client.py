@@ -76,6 +76,8 @@ class RTSPStream:
                 if self.use_gstreamer:
                     pipeline = self._build_gstreamer_pipeline(self.url)
                     self._cap = cv2.VideoCapture(pipeline, cv2.CAP_GSTREAMER)
+                elif self.url.isdigit():
+                    self._cap = cv2.VideoCapture(int(self.url))
                 elif self.url.startswith("http"):
                     self._cap = cv2.VideoCapture(self.url)
                 else:

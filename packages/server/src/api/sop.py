@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.database import get_db
-from src.core.security import get_current_user
+from src.core.security import get_current_user, require_admin
 from src.schemas.sop import SOPCreate, SOPResponse
 from src.services.sop_service import SOPService
 
@@ -26,7 +26,7 @@ async def list_sop_templates(
 async def create_sop_template(
     data: SOPCreate,
     db: AsyncSession = Depends(get_db),
-    _user: dict = Depends(get_current_user),
+    _user: dict = Depends(require_admin),
 ):
     return await _svc.create(db, data)
 
@@ -48,7 +48,7 @@ async def update_sop_template(
     template_id: int,
     data: SOPCreate,
     db: AsyncSession = Depends(get_db),
-    _user: dict = Depends(get_current_user),
+    _user: dict = Depends(require_admin),
 ):
     template = await _svc.get_by_id(db, template_id)
     if not template:
@@ -60,7 +60,7 @@ async def update_sop_template(
 async def delete_sop_template(
     template_id: int,
     db: AsyncSession = Depends(get_db),
-    _user: dict = Depends(get_current_user),
+    _user: dict = Depends(require_admin),
 ):
     template = await _svc.get_by_id(db, template_id)
     if not template:

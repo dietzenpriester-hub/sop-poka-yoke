@@ -11,8 +11,10 @@ from __future__ import annotations
 import dataclasses
 import json
 import os
+import threading
 import time
 from pathlib import Path
+from queue import Empty, Queue
 
 import numpy as np
 from loguru import logger
@@ -22,10 +24,13 @@ from src.capture.recorder import VideoRecorder
 from src.capture.rtsp_client import RTSPStream
 from src.comm.data_sync import OfflineDataSync, Priority
 from src.comm.mqtt_client import MQTTClient
-from src.engine.material_check import BOMValidator
 from src.engine.state_machine import SOPStateMachine, SOPStatus
 from src.inference.yolo_detector import ObjectTracker, YOLODetector
 from src.storage.sqlite_store import SQLiteStore
+
+# 项目根目录：sop-poka-yoke/packages/edge/src/main.py → parents[2] = sop-poka-yoke/packages/edge
+EDGE_ROOT = Path(__file__).resolve().parents[1]
+REPO_ROOT = EDGE_ROOT.parent.parent
 
 
 def _load_sop_template() -> dict:
@@ -80,9 +85,60 @@ def _try_init_vlm():
         return None
 
 
+class _VLMWorker:
+    """在独立线程中异步执行 VLM 推理，避免阻塞主循环。"""
+
+    def __init__(self, vlm):
+        self._vlm = vlm
+        self._request_q: Queue = Queue(maxsize=1)
+        self._result_q: Queue = Queue(maxsize=1)
+        self._running = True
+        self._thread = threading.Thread(target=self._run, daemon=True)
+        self._thread.start()
+
+    def _run(self):
+        while self._running:
+            try:
+                frames, context = self._request_q.get(timeout=1.0)
+            except Empty:
+                continue
+            try:
+                result = self._vlm.classify_action(frames, context)
+            except Exception as e:
+                logger.error("VLM 推理异常: {}", e)
+                result = {"action": "unknown", "confidence": 0}
+            while not self._result_q.empty():
+                try:
+                    self._result_q.get_nowait()
+                except Empty:
+                    break
+            self._result_q.put(result)
+
+    def submit(self, frames, context):
+        """提交推理请求（丢弃旧请求，只保留最新一帧）。"""
+        while not self._request_q.empty():
+            try:
+                self._request_q.get_nowait()
+            except Empty:
+                break
+        self._request_q.put((frames, context))
+
+    def poll_result(self):
+        """非阻塞获取最新推理结果，无结果返回 None。"""
+        try:
+            return self._result_q.get_nowait()
+        except Empty:
+            return None
+
+    def stop(self):
+        self._running = False
+        self._thread.join(timeout=3)
+
+
 def main() -> None:
-    repo_root = Path(__file__).resolve().parents[3]
-    log_dir = repo_root / "logs"
+    data_dir = REPO_ROOT / "data"
+    data_dir.mkdir(parents=True, exist_ok=True)
+    log_dir = REPO_ROOT / "logs"
     log_dir.mkdir(parents=True, exist_ok=True)
     logger.add(
         str(log_dir / "edge_{time}.log"),
@@ -103,13 +159,8 @@ def main() -> None:
     logger.info("  工位: {}", station_id)
     logger.info("  MQTT: {}:{}", mqtt_broker, mqtt_port)
 
-    if camera_url.isdigit():
-        camera_url_parsed: str | int = int(camera_url)
-    else:
-        camera_url_parsed = camera_url
-
     stream = RTSPStream(
-        str(camera_url_parsed) if isinstance(camera_url_parsed, int) else camera_url_parsed,
+        camera_url,
         use_gstreamer=os.environ.get("SOP_USE_GSTREAMER", "0") == "1",
     )
     motion = KeyframeExtractor()
@@ -123,6 +174,7 @@ def main() -> None:
     logger.info("YOLO 预热完成")
 
     vlm = _try_init_vlm()
+    vlm_worker = _VLMWorker(vlm) if vlm else None
     alerter = _try_init_modbus()
 
     mqtt_client = MQTTClient(broker=mqtt_broker, port=mqtt_port, client_id=f"edge-{station_id}")
@@ -144,17 +196,16 @@ def main() -> None:
             mqtt_client.publish(topic, payload)
         logger.warning("[报警] {}", json.dumps(payload, ensure_ascii=False)[:200])
 
-    # 本地库：步骤记录；补传失败时写入死信以便后续处理
-    local_db = SQLiteStore(str(repo_root / "data/edge_local.db"))
+    local_db = SQLiteStore(str(data_dir / "edge_local.db"))
     sync = OfflineDataSync(
         sender=lambda p: send_detection(p),
         dead_letter_store=local_db,
-        dead_letter_jsonl=repo_root / "data/sync_dead_letter.jsonl",
+        dead_letter_jsonl=data_dir / "sync_dead_letter.jsonl",
     )
     sync.start_worker()
 
     recorder = VideoRecorder(
-        output_dir=str(repo_root / "data/clips"),
+        output_dir=str(data_dir / "clips"),
         on_clip_saved=lambda p: sync.enqueue(Priority.P3, {"type": "video", "local_path": p}),
     )
 
@@ -163,9 +214,24 @@ def main() -> None:
         debounce_seconds=float(os.environ.get("SOP_DEBOUNCE_SEC", "0.5")),
     )
 
-    if vlm:
-        # TODO: 接入工单/物料流程后启用 BOM 校验与告警联动
-        bom_validator = BOMValidator(vlm, detector)
+    # 订阅 MQTT override/reset 指令以恢复超时状态
+    def _on_mqtt_command(topic: str, payload: dict):
+        cmd = payload.get("command", "")
+        if cmd == "override":
+            reason = payload.get("reason", "MQTT 远程放行")
+            operator = payload.get("operator_id", "remote")
+            result = fsm.override(reason=reason, operator_id=operator)
+            logger.info("MQTT override: {}", result)
+            alerter.alert_warning()
+        elif cmd == "reset":
+            fsm.reset()
+            logger.info("MQTT reset: 状态机已重置")
+            alerter.alert_idle()
+
+    if mqtt_client:
+        cmd_topic = f"{mqtt_prefix}/{station_id}/command"
+        mqtt_client.subscribe(cmd_topic, _on_mqtt_command)
+        logger.info("已订阅命令主题: {}", cmd_topic)
 
     stream.start()
     fsm.start("DEMO-SN-001")
@@ -228,8 +294,9 @@ def main() -> None:
                 "unique_classes": list(set(det_classes)),
             })
 
-            if vlm:
-                action = vlm.classify_action(
+            # VLM 异步推理：提交请求到独立线程
+            if vlm_worker:
+                vlm_worker.submit(
                     [frame],
                     {
                         "steps": [
@@ -243,7 +310,11 @@ def main() -> None:
                         "current_step_index": fsm.current_step_index,
                     },
                 )
-                result = fsm.process_action(action)
+                action = vlm_worker.poll_result()
+                if action is not None:
+                    result = fsm.process_action(action)
+                else:
+                    result = {"event": "vlm_pending"}
             else:
                 result = {"event": "yolo_only"}
 
@@ -271,7 +342,6 @@ def main() -> None:
                     "message": f"步骤 NG: {result}",
                     "step_index": fsm.current_step_index,
                 })
-                # 视频路径在文件成功落盘后由 on_clip_saved 入队，避免上传不存在的路径
             elif result.get("event") == "step_ok":
                 if fsm.results:
                     sr = fsm.results[-1]
@@ -321,6 +391,8 @@ def main() -> None:
         stream.stop()
         alerter.disconnect()
         sync.stop_worker()
+        if vlm_worker:
+            vlm_worker.stop()
         if mqtt_client:
             mqtt_client.disconnect()
         if vlm:

@@ -57,8 +57,39 @@ def _delete_minio_object(client: Minio, url: str) -> None:
         logger.debug("MinIO 对象删除失败（可能已不存在）: {}", object_name)
 
 
+_CLEANUP_BATCH_SIZE = 200
+
+
+async def _cleanup_batch(db: AsyncSession, model, filters: list, url_fields: list[str],
+                         minio_client, dry_run: bool) -> tuple[int, int]:
+    """分批清理单类记录，避免全量加载到内存。返回 (records, objects)。"""
+    total_records = 0
+    total_objects = 0
+    while True:
+        result = await db.execute(
+            select(model).where(*filters).limit(_CLEANUP_BATCH_SIZE)
+        )
+        batch = result.scalars().all()
+        if not batch:
+            break
+        for r in batch:
+            for field in url_fields:
+                url = getattr(r, field, "")
+                if url:
+                    total_objects += 1
+                    if not dry_run:
+                        _delete_minio_object(minio_client, url)
+                        setattr(r, field, "")
+        total_records += len(batch)
+        if not dry_run:
+            await db.flush()
+        if len(batch) < _CLEANUP_BATCH_SIZE:
+            break
+    return total_records, total_objects
+
+
 async def run_cleanup(db: AsyncSession, dry_run: bool = False) -> dict:
-    """Execute full lifecycle cleanup. Returns summary stats."""
+    """Execute full lifecycle cleanup in batches. Returns summary stats."""
     log = CleanupLog(cleanup_type="full", status="running")
     db.add(log)
     await db.commit()
@@ -71,127 +102,20 @@ async def run_cleanup(db: AsyncSession, dry_run: bool = False) -> dict:
     now = datetime.now(timezone.utc)
 
     try:
-        # 1. Clean StepRecord - OK results (snapshots only, 30 days)
-        cutoff_ok = now - timedelta(days=RETENTION_POLICIES["step_ok"])
-        ok_result = await db.execute(
-            select(StepRecord).where(
-                StepRecord.result == "OK",
-                StepRecord.created_at < cutoff_ok,
-                StepRecord.snapshot_url != "",
-            )
-        )
-        ok_records = ok_result.scalars().all()
-        for r in ok_records:
-            n = 1 if r.snapshot_url else 0
-            total_objects += n
-            if not dry_run:
-                _delete_minio_object(minio_client, r.snapshot_url)
-                r.snapshot_url = ""
-        total_records += len(ok_records)
+        cleanup_tasks = [
+            (StepRecord, [StepRecord.result == "OK", StepRecord.created_at < now - timedelta(days=RETENTION_POLICIES["step_ok"]), StepRecord.snapshot_url != ""], ["snapshot_url"]),
+            (StepRecord, [StepRecord.result == "NG", StepRecord.created_at < now - timedelta(days=RETENTION_POLICIES["step_ng"]), StepRecord.video_url != ""], ["video_url", "snapshot_url"]),
+            (StepRecord, [StepRecord.result == "SKIP", StepRecord.created_at < now - timedelta(days=RETENTION_POLICIES["step_skip"]), StepRecord.video_url != ""], ["video_url"]),
+            (AlertEvent, [AlertEvent.created_at < now - timedelta(days=RETENTION_POLICIES["alert"]), AlertEvent.video_url != ""], ["video_url"]),
+            (MaterialCheck, [MaterialCheck.checked_at < now - timedelta(days=RETENTION_POLICIES["material_check"]), MaterialCheck.snapshot_url != ""], ["snapshot_url"]),
+            (CompletionCheck, [CompletionCheck.checked_at < now - timedelta(days=RETENTION_POLICIES["completion_check"]), CompletionCheck.completion_photo_url != ""], ["completion_photo_url", "reference_photo_url"]),
+            (OverrideLog, [OverrideLog.created_at < now - timedelta(days=RETENTION_POLICIES["override_log"]), OverrideLog.video_url != ""], ["video_url"]),
+        ]
 
-        # 2. Clean StepRecord - NG results (videos, 180 days)
-        cutoff_ng = now - timedelta(days=RETENTION_POLICIES["step_ng"])
-        ng_result = await db.execute(
-            select(StepRecord).where(
-                StepRecord.result == "NG",
-                StepRecord.created_at < cutoff_ng,
-                StepRecord.video_url != "",
-            )
-        )
-        ng_records = ng_result.scalars().all()
-        for r in ng_records:
-            n = (1 if r.video_url else 0) + (1 if r.snapshot_url else 0)
-            total_objects += n
-            if not dry_run:
-                _delete_minio_object(minio_client, r.video_url)
-                _delete_minio_object(minio_client, r.snapshot_url)
-                r.video_url = ""
-                r.snapshot_url = ""
-        total_records += len(ng_records)
-
-        # 3. Clean StepRecord - SKIP results (videos, 7 days)
-        cutoff_skip = now - timedelta(days=RETENTION_POLICIES["step_skip"])
-        skip_result = await db.execute(
-            select(StepRecord).where(
-                StepRecord.result == "SKIP",
-                StepRecord.created_at < cutoff_skip,
-                StepRecord.video_url != "",
-            )
-        )
-        skip_records = skip_result.scalars().all()
-        for r in skip_records:
-            total_objects += 1 if r.video_url else 0
-            if not dry_run:
-                _delete_minio_object(minio_client, r.video_url)
-                r.video_url = ""
-        total_records += len(skip_records)
-
-        # 4. Clean AlertEvent videos (180 days)
-        cutoff_alert = now - timedelta(days=RETENTION_POLICIES["alert"])
-        alert_result = await db.execute(
-            select(AlertEvent).where(
-                AlertEvent.created_at < cutoff_alert,
-                AlertEvent.video_url != "",
-            )
-        )
-        alert_records = alert_result.scalars().all()
-        for r in alert_records:
-            total_objects += 1 if r.video_url else 0
-            if not dry_run:
-                _delete_minio_object(minio_client, r.video_url)
-                r.video_url = ""
-        total_records += len(alert_records)
-
-        # 5. Clean MaterialCheck snapshots (90 days)
-        cutoff_mc = now - timedelta(days=RETENTION_POLICIES["material_check"])
-        mc_result = await db.execute(
-            select(MaterialCheck).where(
-                MaterialCheck.checked_at < cutoff_mc,
-                MaterialCheck.snapshot_url != "",
-            )
-        )
-        mc_records = mc_result.scalars().all()
-        for r in mc_records:
-            total_objects += 1 if r.snapshot_url else 0
-            if not dry_run:
-                _delete_minio_object(minio_client, r.snapshot_url)
-                r.snapshot_url = ""
-        total_records += len(mc_records)
-
-        # 6. Clean CompletionCheck photos (90 days)
-        cutoff_cc = now - timedelta(days=RETENTION_POLICIES["completion_check"])
-        cc_result = await db.execute(
-            select(CompletionCheck).where(
-                CompletionCheck.checked_at < cutoff_cc,
-                CompletionCheck.completion_photo_url != "",
-            )
-        )
-        cc_records = cc_result.scalars().all()
-        for r in cc_records:
-            n = (1 if r.completion_photo_url else 0) + (1 if r.reference_photo_url else 0)
-            total_objects += n
-            if not dry_run:
-                _delete_minio_object(minio_client, r.completion_photo_url)
-                _delete_minio_object(minio_client, r.reference_photo_url)
-                r.completion_photo_url = ""
-                r.reference_photo_url = ""
-        total_records += len(cc_records)
-
-        # 7. Clean OverrideLog videos (365 days)
-        cutoff_ol = now - timedelta(days=RETENTION_POLICIES["override_log"])
-        ol_result = await db.execute(
-            select(OverrideLog).where(
-                OverrideLog.created_at < cutoff_ol,
-                OverrideLog.video_url != "",
-            )
-        )
-        ol_records = ol_result.scalars().all()
-        for r in ol_records:
-            total_objects += 1 if r.video_url else 0
-            if not dry_run:
-                _delete_minio_object(minio_client, r.video_url)
-                r.video_url = ""
-        total_records += len(ol_records)
+        for model, filters, url_fields in cleanup_tasks:
+            records, objects = await _cleanup_batch(db, model, filters, url_fields, minio_client, dry_run)
+            total_records += records
+            total_objects += objects
 
         if not dry_run:
             await db.commit()

@@ -1,7 +1,7 @@
 """数据导出服务 — 生成 Excel 文件"""
 
 import io
-from datetime import datetime
+from datetime import datetime, timezone
 
 from openpyxl import Workbook
 from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
@@ -68,6 +68,19 @@ def _fmt_dt(dt) -> str:
     return str(dt)
 
 
+def _parse_filter_date(date_str: str, end_of_day: bool = False) -> datetime:
+    """将日期筛选字符串解析为 datetime，避免与 datetime 列直接字符串比较。"""
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d"):
+        try:
+            dt = datetime.strptime(date_str.strip(), fmt)
+            if fmt == "%Y-%m-%d" and end_of_day:
+                dt = dt.replace(hour=23, minute=59, second=59)
+            return dt.replace(tzinfo=timezone.utc)
+        except ValueError:
+            continue
+    raise ValueError(f"无效日期格式: {date_str}")
+
+
 async def export_workorders(db: AsyncSession, **filters) -> bytes:
     stmt = select(WorkOrder).order_by(WorkOrder.start_time.desc())
     if filters.get("station_id"):
@@ -75,9 +88,9 @@ async def export_workorders(db: AsyncSession, **filters) -> bytes:
     if filters.get("status"):
         stmt = stmt.where(WorkOrder.status == filters["status"])
     if filters.get("start_date"):
-        stmt = stmt.where(WorkOrder.start_time >= filters["start_date"])
+        stmt = stmt.where(WorkOrder.start_time >= _parse_filter_date(filters["start_date"]))
     if filters.get("end_date"):
-        stmt = stmt.where(WorkOrder.start_time <= filters["end_date"])
+        stmt = stmt.where(WorkOrder.start_time <= _parse_filter_date(filters["end_date"], end_of_day=True))
 
     result = await db.execute(stmt)
     rows = result.scalars().all()
@@ -113,9 +126,9 @@ async def export_alerts(db: AsyncSession, **filters) -> bytes:
     if filters.get("severity"):
         stmt = stmt.where(AlertEvent.severity == filters["severity"])
     if filters.get("start_date"):
-        stmt = stmt.where(AlertEvent.created_at >= filters["start_date"])
+        stmt = stmt.where(AlertEvent.created_at >= _parse_filter_date(filters["start_date"]))
     if filters.get("end_date"):
-        stmt = stmt.where(AlertEvent.created_at <= filters["end_date"])
+        stmt = stmt.where(AlertEvent.created_at <= _parse_filter_date(filters["end_date"], end_of_day=True))
 
     result = await db.execute(stmt)
     rows = result.scalars().all()
@@ -151,9 +164,9 @@ async def export_material_checks(db: AsyncSession, **filters) -> bytes:
     if filters.get("workorder_id"):
         stmt = stmt.where(MaterialCheck.workorder_id == filters["workorder_id"])
     if filters.get("start_date"):
-        stmt = stmt.where(MaterialCheck.checked_at >= filters["start_date"])
+        stmt = stmt.where(MaterialCheck.checked_at >= _parse_filter_date(filters["start_date"]))
     if filters.get("end_date"):
-        stmt = stmt.where(MaterialCheck.checked_at <= filters["end_date"])
+        stmt = stmt.where(MaterialCheck.checked_at <= _parse_filter_date(filters["end_date"], end_of_day=True))
 
     result = await db.execute(stmt)
     rows = result.scalars().all()
@@ -186,9 +199,9 @@ async def export_completion_checks(db: AsyncSession, **filters) -> bytes:
     if filters.get("workorder_id"):
         stmt = stmt.where(CompletionCheck.workorder_id == filters["workorder_id"])
     if filters.get("start_date"):
-        stmt = stmt.where(CompletionCheck.checked_at >= filters["start_date"])
+        stmt = stmt.where(CompletionCheck.checked_at >= _parse_filter_date(filters["start_date"]))
     if filters.get("end_date"):
-        stmt = stmt.where(CompletionCheck.checked_at <= filters["end_date"])
+        stmt = stmt.where(CompletionCheck.checked_at <= _parse_filter_date(filters["end_date"], end_of_day=True))
 
     result = await db.execute(stmt)
     rows = result.scalars().all()
@@ -220,9 +233,9 @@ async def export_override_logs(db: AsyncSession, **filters) -> bytes:
     if filters.get("workorder_id"):
         stmt = stmt.where(OverrideLog.workorder_id == filters["workorder_id"])
     if filters.get("start_date"):
-        stmt = stmt.where(OverrideLog.created_at >= filters["start_date"])
+        stmt = stmt.where(OverrideLog.created_at >= _parse_filter_date(filters["start_date"]))
     if filters.get("end_date"):
-        stmt = stmt.where(OverrideLog.created_at <= filters["end_date"])
+        stmt = stmt.where(OverrideLog.created_at <= _parse_filter_date(filters["end_date"], end_of_day=True))
 
     result = await db.execute(stmt)
     rows = result.scalars().all()

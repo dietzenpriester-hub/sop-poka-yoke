@@ -1,5 +1,7 @@
 """审计日志查询 API"""
 
+from datetime import datetime, timedelta, timezone
+
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -9,6 +11,19 @@ from src.core.security import require_admin
 from src.models.audit_log import AuditLog
 
 router = APIRouter()
+
+
+def _parse_date(date_str: str, end_of_day: bool = False) -> datetime:
+    """将日期字符串解析为 UTC datetime。end_of_day=True 时取当天 23:59:59。"""
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d"):
+        try:
+            dt = datetime.strptime(date_str.strip(), fmt)
+            if fmt == "%Y-%m-%d" and end_of_day:
+                dt = dt.replace(hour=23, minute=59, second=59)
+            return dt.replace(tzinfo=timezone.utc)
+        except ValueError:
+            continue
+    raise ValueError(f"无效日期格式: {date_str}")
 
 
 @router.get("/")
@@ -31,9 +46,9 @@ async def list_audit_logs(
     if resource:
         conditions.append(AuditLog.resource == resource)
     if start_date:
-        conditions.append(AuditLog.created_at >= start_date)
+        conditions.append(AuditLog.created_at >= _parse_date(start_date))
     if end_date:
-        conditions.append(AuditLog.created_at <= end_date)
+        conditions.append(AuditLog.created_at <= _parse_date(end_date, end_of_day=True))
 
     q = select(AuditLog)
     count_q = select(func.count(AuditLog.id))

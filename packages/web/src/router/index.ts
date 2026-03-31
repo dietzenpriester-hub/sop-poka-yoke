@@ -23,7 +23,7 @@ const router = createRouter({
     { path: "/notification", name: "notification", component: () => import("@/views/NotificationConfig.vue"), meta: { requiresAdmin: true } },
     { path: "/audit", name: "audit", component: () => import("@/views/AuditLog.vue"), meta: { requiresAdmin: true } },
     { path: "/network-error", name: "network-error", component: () => import("@/views/NetworkError.vue"), meta: { public: true } },
-    { path: "/:pathMatch(.*)*", name: "not-found", component: () => import("@/views/NotFound.vue") },
+    { path: "/:pathMatch(.*)*", name: "not-found", component: () => import("@/views/NotFound.vue"), meta: { public: true } },
   ],
 });
 
