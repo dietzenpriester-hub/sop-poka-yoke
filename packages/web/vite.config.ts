@@ -18,10 +18,16 @@ export default defineConfig({
       "/api": {
         target: apiUrl,
         changeOrigin: true,
+        ws: true,
       },
       "/ws": {
         target: wsTarget,
         ws: true,
+      },
+      "/mjpeg": {
+        target: process.env.VITE_MJPEG_URL || "http://localhost:8766",
+        changeOrigin: true,
+        rewrite: (path: string) => path.replace(/^\/mjpeg/, ""),
       },
     },
   },

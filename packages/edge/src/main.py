@@ -200,6 +200,12 @@ def main() -> None:
     vlm_worker = _VLMWorker(vlm) if vlm else None
     alerter = _try_init_modbus()
 
+    from src.comm.mjpeg_server import MJPEGServer
+    mjpeg_port = int(os.environ.get("SOP_MJPEG_PORT", "8766"))
+    mjpeg_fps = int(os.environ.get("SOP_MJPEG_FPS", "30"))
+    mjpeg = MJPEGServer(port=mjpeg_port, max_fps=mjpeg_fps, jpeg_quality=92, max_dim=1920)
+    mjpeg.start()
+
     import uuid
     mqtt_uid = uuid.uuid4().hex[:8]
     mqtt_client = MQTTClient(broker=mqtt_broker, port=mqtt_port, client_id=f"edge-{station_id}-{mqtt_uid}")
@@ -320,6 +326,7 @@ def main() -> None:
                 continue
 
             frame, ts = item
+            mjpeg.update_frame(frame)
             if fsm.status == SOPStatus.TIMEOUT:
                 recorder.feed(frame, ts)
                 continue
@@ -477,6 +484,7 @@ def main() -> None:
         logger.info("用户中断，正在停止...")
     finally:
         stream.stop()
+        mjpeg.stop()
         alerter.disconnect()
         sync.stop_worker()
         if vlm_worker:

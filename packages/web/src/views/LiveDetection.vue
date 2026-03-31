@@ -270,17 +270,18 @@ onUnmounted(() => {
             <template #header>
               <div class="card-header-row">
                 <span class="card-title">摄像头实时画面</span>
-                <el-tag size="small" :type="snapshotSrc ? 'success' : 'info'">
-                  {{ snapshotSrc ? "画面正常" : "等待画面..." }}
+                <el-tag size="small" :type="monitoring ? 'success' : 'info'">
+                  {{ monitoring ? "实时画面" : "等待画面..." }}
                 </el-tag>
               </div>
             </template>
             <div class="video-container">
               <img
-                v-if="snapshotSrc"
-                :src="snapshotSrc"
+                v-if="monitoring"
+                :src="'/mjpeg/stream'"
                 class="snapshot-img"
-                alt="实时快照"
+                style="transform: scaleX(-1)"
+                alt="MJPEG 实时视频"
               />
               <div v-else class="video-placeholder">
                 <el-icon :size="48" color="#c0c4cc"><Connection /></el-icon>
