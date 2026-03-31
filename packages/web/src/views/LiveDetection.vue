@@ -14,10 +14,20 @@ import {
 import { stationApi, type StationItem } from "@/api/station";
 import { useStationWebSocket } from "@/composables/useWebSocket";
 
+interface StepDetection {
+  vlmAction: string;
+  vlmConfidence: number;
+  vlmMatches: boolean;
+  yoloObjects: string[];
+  timestamp: string;
+  snapshot: string;
+}
+
 interface StepInfo {
   index: number;
   name: string;
   status: "pending" | "active" | "ok" | "ng" | "timeout";
+  detection: StepDetection | null;
 }
 
 interface SopStatus {
@@ -70,15 +80,14 @@ function handleWsMessage(data: unknown) {
         index: i,
         name: `步骤 ${i + 1}`,
         status: "pending" as const,
+        detection: null,
       }));
     }
     for (const s of steps.value) {
       if (s.index < status.current_step_index) {
-        s.status = "ok";
+        if (s.status === "pending" || s.status === "active") s.status = "ok";
       } else if (s.index === status.current_step_index) {
-        s.status = "active";
-      } else {
-        s.status = "pending";
+        if (s.status === "pending") s.status = "active";
       }
     }
 
@@ -86,19 +95,31 @@ function handleWsMessage(data: unknown) {
       steps.value[status.current_step_index].name = status.current_step_name;
     }
 
+    const curStep = steps.value[status.current_step_index];
+    if (curStep) {
+      curStep.detection = {
+        vlmAction: status.vlm_action || "",
+        vlmConfidence: status.vlm_confidence || 0,
+        vlmMatches: status.vlm_matches || false,
+        yoloObjects: status.yolo_objects || [],
+        timestamp: status.timestamp,
+        snapshot: status.snapshot || "",
+      };
+    }
+
     if (status.event === "step_ok") {
       const idx = status.current_step_index;
       if (idx > 0 && idx - 1 < steps.value.length) {
         steps.value[idx - 1].status = "ok";
       }
-      addEvent("success", `步骤 ${idx} 完成 ✓`);
+      addEvent("success", `步骤 ${idx} 完成`);
     } else if (status.event === "step_ng") {
       if (status.current_step_index < steps.value.length) {
         steps.value[status.current_step_index].status = "ng";
       }
-      addEvent("danger", `步骤 ${status.current_step_index + 1} NG！`);
+      addEvent("danger", `步骤 ${status.current_step_index + 1} NG`);
     } else if (status.event === "complete") {
-      addEvent("success", "所有 SOP 步骤已完成！");
+      addEvent("success", "所有 SOP 步骤已完成");
     }
 
     yoloObjects.value = status.yolo_objects || [];
@@ -384,36 +405,79 @@ onUnmounted(() => {
             <el-empty v-else description="等待 SOP 状态..." :image-size="50" />
           </el-card>
 
-          <!-- 步骤列表 -->
+          <!-- 步骤列表 + 检测详情 -->
           <el-card class="steps-card" shadow="never" style="margin-top: 16px">
             <template #header>
-              <span class="card-title">步骤明细</span>
+              <span class="card-title">步骤检测明细</span>
             </template>
-            <el-scrollbar max-height="280px">
+            <el-scrollbar max-height="480px">
               <div v-if="steps.length > 0" class="step-list">
                 <div
                   v-for="s in steps"
                   :key="s.index"
-                  class="step-item"
+                  class="step-item-detail"
                   :class="`step-${s.status}`"
                 >
-                  <div class="step-icon">
-                    <el-icon v-if="s.status === 'ok'" color="#67c23a"><Check /></el-icon>
-                    <el-icon v-else-if="s.status === 'ng'" color="#f56c6c"><Close /></el-icon>
-                    <el-icon v-else-if="s.status === 'active'" color="#409eff" class="spin"><Loading /></el-icon>
-                    <el-icon v-else-if="s.status === 'timeout'" color="#e6a23c"><Warning /></el-icon>
-                    <span v-else class="step-num">{{ s.index + 1 }}</span>
+                  <div class="step-header-row">
+                    <div class="step-icon">
+                      <el-icon v-if="s.status === 'ok'" color="#67c23a"><Check /></el-icon>
+                      <el-icon v-else-if="s.status === 'ng'" color="#f56c6c"><Close /></el-icon>
+                      <el-icon v-else-if="s.status === 'active'" color="#409eff" class="spin"><Loading /></el-icon>
+                      <el-icon v-else-if="s.status === 'timeout'" color="#e6a23c"><Warning /></el-icon>
+                      <span v-else class="step-num">{{ s.index + 1 }}</span>
+                    </div>
+                    <div class="step-text">
+                      <span class="step-name">{{ s.name }}</span>
+                      <el-tag
+                        v-if="s.status !== 'pending'"
+                        :type="s.status === 'ok' ? 'success' : s.status === 'ng' ? 'danger' : s.status === 'active' ? '' : 'warning'"
+                        size="small"
+                        style="margin-left: 8px"
+                      >
+                        {{ s.status === 'ok' ? '完成' : s.status === 'ng' ? 'NG' : s.status === 'active' ? '执行中' : '超时' }}
+                      </el-tag>
+                    </div>
                   </div>
-                  <div class="step-text">
-                    <span class="step-name">{{ s.name }}</span>
-                    <el-tag
-                      v-if="s.status !== 'pending'"
-                      :type="s.status === 'ok' ? 'success' : s.status === 'ng' ? 'danger' : s.status === 'active' ? '' : 'warning'"
-                      size="small"
-                      style="margin-left: 8px"
-                    >
-                      {{ s.status === 'ok' ? '完成' : s.status === 'ng' ? 'NG' : s.status === 'active' ? '执行中' : '超时' }}
-                    </el-tag>
+
+                  <!-- 检测详情 -->
+                  <div v-if="s.detection" class="step-detection">
+                    <div class="det-row">
+                      <span class="det-label">VLM 动作:</span>
+                      <span class="det-value">{{ s.detection.vlmAction || "—" }}</span>
+                    </div>
+                    <div class="det-row">
+                      <span class="det-label">置信度:</span>
+                      <el-progress
+                        :percentage="Math.round(s.detection.vlmConfidence * 100)"
+                        :color="s.detection.vlmConfidence >= 0.8 ? '#67c23a' : s.detection.vlmConfidence >= 0.5 ? '#e6a23c' : '#f56c6c'"
+                        :stroke-width="12"
+                        style="flex: 1; margin-left: 8px"
+                      />
+                    </div>
+                    <div class="det-row">
+                      <span class="det-label">匹配:</span>
+                      <el-tag :type="s.detection.vlmMatches ? 'success' : 'danger'" size="small" effect="plain">
+                        {{ s.detection.vlmMatches ? "匹配" : "不匹配" }}
+                      </el-tag>
+                    </div>
+                    <div v-if="s.detection.yoloObjects.length > 0" class="det-row">
+                      <span class="det-label">检测物体:</span>
+                      <div class="det-tags">
+                        <el-tag
+                          v-for="obj in s.detection.yoloObjects"
+                          :key="obj"
+                          type="info"
+                          size="small"
+                          effect="plain"
+                        >{{ obj }}</el-tag>
+                      </div>
+                    </div>
+                    <div class="det-row det-time">
+                      <span>{{ s.detection.timestamp }}</span>
+                    </div>
+                  </div>
+                  <div v-else-if="s.status === 'pending'" class="step-detection step-pending-hint">
+                    <span>等待执行...</span>
                   </div>
                 </div>
               </div>
@@ -677,6 +741,70 @@ export default { components: { Monitor } };
 .step-text {
   display: flex;
   align-items: center;
+}
+
+.step-item-detail {
+  padding: 10px 12px;
+  border-radius: 8px;
+  transition: background 0.2s;
+  border-bottom: 1px solid #f0f0f0;
+}
+.step-item-detail:last-child {
+  border-bottom: none;
+}
+.step-item-detail.step-active {
+  background: rgba(64, 158, 255, 0.08);
+}
+.step-item-detail.step-ok {
+  background: rgba(103, 194, 58, 0.06);
+}
+.step-item-detail.step-ng {
+  background: rgba(245, 108, 108, 0.08);
+}
+.step-header-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.step-detection {
+  margin-top: 8px;
+  margin-left: 40px;
+  padding: 8px 12px;
+  background: rgba(0, 0, 0, 0.02);
+  border-radius: 6px;
+  font-size: 13px;
+}
+.step-pending-hint {
+  color: #c0c4cc;
+  font-style: italic;
+}
+.det-row {
+  display: flex;
+  align-items: center;
+  margin-bottom: 4px;
+  gap: 6px;
+}
+.det-row:last-child {
+  margin-bottom: 0;
+}
+.det-label {
+  color: #909399;
+  white-space: nowrap;
+  min-width: 65px;
+}
+.det-value {
+  color: #303133;
+  font-weight: 500;
+}
+.det-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.det-time {
+  justify-content: flex-end;
+  font-size: 11px;
+  color: #c0c4cc;
 }
 
 .step-name {

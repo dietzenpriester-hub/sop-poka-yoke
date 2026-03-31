@@ -25,7 +25,7 @@ class VLMClient:
     def __init__(
         self,
         base_url: str = "http://localhost:11434",
-        model: str = "qwen2.5-vl:7b",
+        model: str = "qwen2.5vl:3b",
         timeout: float = 60.0,
     ) -> None:
         self.base_url = base_url

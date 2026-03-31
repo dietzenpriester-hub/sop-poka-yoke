@@ -34,7 +34,7 @@ class Settings(BaseSettings):
 
     # AI 分析配置
     OLLAMA_URL: str = "http://localhost:11434"
-    VLM_MODEL: str = "qwen2.5-vl:7b"
+    VLM_MODEL: str = "qwen2.5vl:3b"
     VLM_TIMEOUT: float = 300.0
     YOLO_MODEL: str = "yolo11n.pt"
     YOLO_DEVICE: str = ""  # 空字符串 = 自动选择 (MPS > CPU)

@@ -94,7 +94,7 @@ def _try_init_vlm():
         from src.inference.vlm_recognizer import VLMClient
         vlm = VLMClient(
             base_url=os.environ.get("SOP_OLLAMA_URL", "http://localhost:11434"),
-            model=os.environ.get("SOP_VLM_MODEL", "qwen2.5-vl:7b"),
+            model=os.environ.get("SOP_VLM_MODEL", "qwen2.5vl:3b"),
         )
         warmup_frame = np.zeros((100, 100, 3), dtype=np.uint8)
         result = vlm.classify_action([warmup_frame], {"steps": [{"name": "warmup"}], "current_step_index": 0})
@@ -203,7 +203,7 @@ def main() -> None:
     from src.comm.mjpeg_server import MJPEGServer
     mjpeg_port = int(os.environ.get("SOP_MJPEG_PORT", "8766"))
     mjpeg_fps = int(os.environ.get("SOP_MJPEG_FPS", "30"))
-    mjpeg = MJPEGServer(port=mjpeg_port, max_fps=mjpeg_fps, jpeg_quality=92, max_dim=1920)
+    mjpeg = MJPEGServer(port=mjpeg_port, max_fps=mjpeg_fps, jpeg_quality=85, max_dim=1280)
     mjpeg.start()
 
     import uuid
