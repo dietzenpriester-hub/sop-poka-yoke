@@ -87,10 +87,12 @@ class OfflineDataSync:
         *,
         dead_letter_store: SQLiteStore | None = None,
         dead_letter_jsonl: Path | None = None,
+        data_dir: Path | None = None,
     ) -> None:
         self._sender = sender
         self._dead_letter_store = dead_letter_store
         self._dead_letter_jsonl = dead_letter_jsonl
+        self._data_dir = data_dir or (dead_letter_jsonl.parent if dead_letter_jsonl else Path("."))
         self._queue: list[SyncTask] = []
         self._lock = threading.Lock()
         self._seq = 0
@@ -178,7 +180,8 @@ class OfflineDataSync:
                         "sqlite_error": str(ex),
                         "ts": time.time(),
                     }
-                    with open("dead_letter_fallback.log", "a", encoding="utf-8") as f:
+                    fallback_path = self._data_dir / "dead_letter_fallback.log"
+                    with open(fallback_path, "a", encoding="utf-8") as f:
                         f.write(json.dumps(task_dict, ensure_ascii=False) + "\n")
                 except Exception as fb:
                     logger.critical("死信 fallback 日志写入失败: {}", fb)
@@ -207,7 +210,8 @@ class OfflineDataSync:
                         "jsonl_error": str(ex),
                         "ts": time.time(),
                     }
-                    with open("dead_letter_fallback.log", "a", encoding="utf-8") as f:
+                    fallback_path = self._data_dir / "dead_letter_fallback.log"
+                    with open(fallback_path, "a", encoding="utf-8") as f:
                         f.write(json.dumps(task_dict, ensure_ascii=False) + "\n")
                 except Exception as fb:
                     logger.critical("死信 fallback 日志写入失败: {}", fb)

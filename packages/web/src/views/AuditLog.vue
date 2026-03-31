@@ -131,8 +131,8 @@ onMounted(loadLogs);
             <el-option label="通知" value="notification" />
           </el-select>
         </el-form-item>
-        <el-form-item label="用户ID">
-          <el-input v-model="filters.username" clearable placeholder="输入用户ID" style="width: 120px" />
+        <el-form-item label="用户名">
+          <el-input v-model="filters.username" clearable placeholder="输入用户名" style="width: 120px" />
         </el-form-item>
         <el-form-item>
           <el-button type="primary" @click="handleSearch">查询</el-button>

@@ -177,11 +177,17 @@ class _VLMWorker:
         self._thread.join(timeout=3)
 
 
+_DEFAULT_EDGE_SECRET = "sop-edge-internal-secret"
+
+
 def main() -> None:
     data_dir = REPO_ROOT / "data"
     data_dir.mkdir(parents=True, exist_ok=True)
     log_dir = REPO_ROOT / "logs"
     log_dir.mkdir(parents=True, exist_ok=True)
+
+    if os.environ.get("SOP_EDGE_SECRET", _DEFAULT_EDGE_SECRET) == _DEFAULT_EDGE_SECRET:
+        logger.warning("⚠ SOP_EDGE_SECRET 使用默认值，生产环境请务必设置自定义密钥！")
     logger.add(
         str(log_dir / "edge_{time}.log"),
         rotation="100 MB",
@@ -332,7 +338,7 @@ def main() -> None:
         elif cmd == "override":
             reason = payload.get("reason", "MQTT 远程放行")
             operator = payload.get("operator_id", "remote")
-            result = fsm.override(reason=reason, operator_id=operator)
+            result = fsm.override(operator_badge=operator, reason=reason)
             logger.info("MQTT override: {}", result)
             alerter.alert_warning()
         elif cmd == "reset":

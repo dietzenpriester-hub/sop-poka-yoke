@@ -48,14 +48,19 @@ async def websocket_live(websocket: WebSocket, station_id: str):
         return
 
     user_role = user_payload.get("role", "") if isinstance(user_payload, dict) else ""
+    user_id = user_payload.get("user_id") if isinstance(user_payload, dict) else None
     if not user_role:
         await websocket.close(code=4403)
         return
 
+    # 非管理员用户连接时记录审计日志，便于追踪越权访问
+    if user_role != "admin":
+        logger.info("非管理员用户(id={}, role={})连接工位 {} 的 WebSocket", user_id, user_role, station_id)
+
     if station_id not in active_connections:
         active_connections[station_id] = []
     active_connections[station_id].append(websocket)
-    logger.info("WebSocket 连接: station={}", station_id)
+    logger.info("WebSocket 连接: station={} user_id={} role={}", station_id, user_id, user_role)
     try:
         while True:
             data = await websocket.receive_text()

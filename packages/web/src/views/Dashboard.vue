@@ -10,7 +10,6 @@ import {
   WarningFilled,
 } from "@element-plus/icons-vue";
 import { useECharts } from "@/composables/useECharts";
-import { useStationWebSocket } from "@/composables/useWebSocket";
 import {
   dashboardApi,
   type DashboardOverview,
@@ -25,11 +24,7 @@ const stationStatus = ref<StationStatusItem[]>([]);
 const recentAlerts = ref<RecentAlert[]>([]);
 const loading = ref(false);
 
-const wsStationId = ref("");
-
 const { chartRef: trendChartRef, setOption: setTrendOption, resize: resizeTrend } = useECharts();
-
-const { ready: wsReady } = useStationWebSocket(wsStationId, () => {});
 
 let refreshTimer: ReturnType<typeof setInterval> | null = null;
 let requestSeq = 0;
@@ -143,15 +138,6 @@ const statItems: StatItem[] = [
     <div class="page-header">
       <h2>实时监控仪表盘</h2>
       <div class="page-header-actions">
-        <el-tag
-          :type="wsReady ? 'success' : 'danger'"
-          effect="dark"
-          round
-          size="small"
-        >
-          <span class="ws-dot" :class="{ online: wsReady }" />
-          {{ wsReady ? "在线" : "离线" }}
-        </el-tag>
         <el-text type="info" size="small">每 15 秒自动刷新</el-text>
       </div>
     </div>
@@ -295,26 +281,6 @@ const statItems: StatItem[] = [
   font-weight: 700;
   letter-spacing: -0.5px;
   line-height: 1.1;
-}
-
-.ws-dot {
-  display: inline-block;
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: #f56c6c;
-  margin-right: 4px;
-  vertical-align: middle;
-}
-
-.ws-dot.online {
-  background: #67c23a;
-  animation: pulse 2s infinite;
-}
-
-@keyframes pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.4; }
 }
 
 .station-card {

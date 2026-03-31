@@ -43,12 +43,20 @@ class Settings(BaseSettings):
 
     def warn_default_secrets(self) -> None:
         """若仍使用开发环境占位密钥，记录警告（不修改默认值，便于本地开发）。"""
+        import os
+        is_production = os.environ.get("SOP_ENV", "").lower() == "production"
+        level = "error" if is_production else "warning"
+        log = getattr(logger, level)
         if self.JWT_SECRET == "sop-pokayoke-secret-key-change-in-production":
-            logger.warning("JWT_SECRET 仍为默认占位值，生产环境请务必修改")
+            log("JWT_SECRET 仍为默认占位值，生产环境请务必修改")
         if ":changeme@" in self.DATABASE_URL:
-            logger.warning("DATABASE_URL 中数据库密码仍为占位值 (changeme)，生产环境请务必修改")
+            log("DATABASE_URL 中数据库密码仍为占位值 (changeme)，生产环境请务必修改")
         if self.MINIO_ACCESS_KEY == "minioadmin" and self.MINIO_SECRET_KEY == "changeme":
-            logger.warning("MINIO_ACCESS_KEY / MINIO_SECRET_KEY 仍为默认占位值，生产环境请务必修改")
+            log("MINIO_ACCESS_KEY / MINIO_SECRET_KEY 仍为默认占位值，生产环境请务必修改")
+        if self.EDGE_SECRET == "sop-edge-internal-secret":
+            log("EDGE_SECRET 仍为默认占位值，生产环境请务必修改")
+        if is_production and self.DEV_MODE:
+            logger.error("生产环境不应启用 DEV_MODE，请设置 SOP_DEV_MODE=false")
 
 
 @lru_cache

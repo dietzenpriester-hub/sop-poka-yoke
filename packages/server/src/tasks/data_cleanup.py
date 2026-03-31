@@ -65,10 +65,12 @@ async def _cleanup_batch(db: AsyncSession, model, filters: list, url_fields: lis
     """分批清理单类记录，避免全量加载到内存。返回 (records, objects)。"""
     total_records = 0
     total_objects = 0
+    offset = 0
     while True:
-        result = await db.execute(
-            select(model).where(*filters).limit(_CLEANUP_BATCH_SIZE)
-        )
+        stmt = select(model).where(*filters).limit(_CLEANUP_BATCH_SIZE)
+        if dry_run:
+            stmt = stmt.offset(offset)
+        result = await db.execute(stmt)
         batch = result.scalars().all()
         if not batch:
             break
@@ -85,6 +87,8 @@ async def _cleanup_batch(db: AsyncSession, model, filters: list, url_fields: lis
             await db.flush()
         if len(batch) < _CLEANUP_BATCH_SIZE:
             break
+        if dry_run:
+            offset += _CLEANUP_BATCH_SIZE
     return total_records, total_objects
 
 

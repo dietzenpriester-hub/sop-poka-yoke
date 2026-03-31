@@ -24,17 +24,25 @@ class ModbusAlertController:
         self.buzzer_reg = buzzer_register
         self._client: ModbusTcpClient | None = None
 
-    def connect(self) -> None:
+    @property
+    def connected(self) -> bool:
+        return self._client is not None and self._client.is_socket_open()
+
+    def connect(self) -> bool:
         self._client = ModbusTcpClient(self.host, port=self.port)
         if self._client.connect():
             logger.info("Modbus 已连接: {}:{}", self.host, self.port)
-        else:
-            logger.error("Modbus 连接失败: {}:{}", self.host, self.port)
+            return True
+        logger.error("Modbus 连接失败: {}:{}", self.host, self.port)
+        self._client.close()
+        self._client = None
+        return False
 
     def set_status(self, color: LightColor, buzzer: bool = False) -> None:
         try:
-            if not self._client or not self._client.is_socket_open():
-                self.connect()
+            if not self.connected:
+                if not self.connect():
+                    return
             if self._client:
                 resp_light = self._client.write_register(self.light_reg, color.value)
                 if resp_light.isError():

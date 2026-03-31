@@ -98,9 +98,40 @@ async def _handle_alert(station_id: str, payload: dict) -> None:
         logger.warning("报警未入库，跳过 WebSocket 广播: station={}", station_id)
 
 
+async def _validate_station(station_id: str) -> bool:
+    """校验 station_id 是否已注册，未注册则拒绝处理。"""
+    if station_id in _station_cache:
+        return _station_cache[station_id] is not None
+    from sqlalchemy import or_, select
+    from src.core.database import async_session_factory
+    from src.models.station import Station
+    try:
+        async with async_session_factory() as session:
+            st_r = await session.execute(
+                select(Station.id).where(
+                    or_(Station.edge_device_id == station_id, Station.name == station_id),
+                ).limit(1),
+            )
+            row = st_r.scalar_one_or_none()
+            if len(_station_cache) >= _STATION_CACHE_MAX:
+                _station_cache.clear()
+            _station_cache[station_id] = row
+            return row is not None
+    except Exception as e:
+        logger.warning("校验 station_id 异常: {} — {}", station_id, e)
+        return True  # 数据库异常时放行，避免阻断正常消息
+
+
 async def _dispatch_message(station_id: str, event_kind: str, payload: dict) -> None:
-    """根据事件类型分发处理逻辑。"""
+    """根据事件类型分发处理逻辑，校验 station_id 合法性。"""
+    if not all(c.isalnum() or c in ("-", "_") for c in station_id):
+        logger.warning("MQTT 消息 station_id 含非法字符，已丢弃: {}", station_id)
+        return
     if event_kind == "alert/raise":
+        known = await _validate_station(station_id)
+        if not known:
+            logger.warning("MQTT 告警来自未注册工位 {}，已丢弃", station_id)
+            return
         await _handle_alert(station_id, payload)
     else:
         await broadcast_to_station(station_id, {"topic": f"{settings.MQTT_TOPIC_PREFIX}/{station_id}/{event_kind}", "payload": payload})

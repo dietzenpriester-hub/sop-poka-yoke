@@ -14,6 +14,7 @@ from src.core.config import get_settings
 security_scheme = HTTPBearer(auto_error=False)
 
 _DEV_TOKEN = "dev-token"
+_dev_mode_warned = False
 
 
 def create_access_token(user_id: int, role: str | None = None, expires_delta: timedelta | None = None) -> str:
@@ -34,11 +35,16 @@ def create_access_token(user_id: int, role: str | None = None, expires_delta: ti
 def verify_token(token: str) -> dict:
     """校验 token 并返回 {"user_id": int, "role": str}。DEV_MODE 下可接受 dev-token。"""
     settings = get_settings()
+    global _dev_mode_warned
     is_production = os.environ.get("SOP_ENV", "").lower() == "production"
     if is_production and settings.DEV_MODE:
-        logger.warning("DEV_MODE 与 SOP_ENV=production 同时设置，已忽略 DEV_MODE（按生产校验 JWT）")
+        if not _dev_mode_warned:
+            logger.error("DEV_MODE 与 SOP_ENV=production 同时设置，已强制忽略 DEV_MODE（按生产校验 JWT）")
+            _dev_mode_warned = True
     elif settings.DEV_MODE and not is_production and token == _DEV_TOKEN:
-        logger.debug("DEV_MODE: 接受 dev-token（仅限非生产环境）")
+        if not _dev_mode_warned:
+            logger.warning("⚠ DEV_MODE 已启用，dev-token 可绕过认证。生产环境请设置 SOP_DEV_MODE=false")
+            _dev_mode_warned = True
         return {"user_id": 1, "role": "admin"}
     try:
         payload = jwt.decode(
