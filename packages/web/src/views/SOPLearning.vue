@@ -9,14 +9,26 @@ function isAnalysisRunning(status: string): boolean {
   return !["completed", "failed", "confirmed"].includes(status);
 }
 
+function phaseProgress(status: string): string {
+  const map: Record<string, string> = {
+    phase_1: "运动分析 → 动作段自动分割",
+    phase_2: "YOLO 检测每段中的物体",
+    phase_3: "VLM 逐段识别操作动作",
+    phase_4: "组装步骤 + 生成判定标准",
+    phase_5: "绑定参考帧截图",
+  };
+  return map[status] || "";
+}
+
 function statusLabel(status: string): string {
   const map: Record<string, string> = {
     queued: "排队中",
     analyzing: "分析中",
-    phase_1: "阶段1·分帧",
-    phase_2: "阶段2·识别",
-    phase_3: "阶段3·分析",
-    phase_4: "阶段4·优化",
+    phase_1: "阶段1·动作分割",
+    phase_2: "阶段2·目标检测",
+    phase_3: "阶段3·逐段识别",
+    phase_4: "阶段4·步骤组装",
+    phase_5: "阶段5·参考帧绑定",
     completed: "已完成",
     failed: "失败",
     confirmed: "已确认",
@@ -35,6 +47,8 @@ function statusTagType(status: string): "info" | "success" | "warning" | "danger
 function normalizeStep(raw: Record<string, unknown>, index: number): LearningStep {
   const req = raw.required_objects;
   const required_objects = Array.isArray(req) ? req.map(String) : [];
+  const seg_ids = raw.segment_ids;
+  const segment_ids = Array.isArray(seg_ids) ? seg_ids.map(Number) : [];
   return {
     index: typeof raw.index === "number" ? raw.index : index,
     name: typeof raw.name === "string" ? raw.name : "",
@@ -47,9 +61,21 @@ function normalizeStep(raw: Record<string, unknown>, index: number): LearningSte
         : 30,
     is_optional: Boolean(raw.is_optional),
     reference_frame_url: typeof raw.reference_frame_url === "string" ? raw.reference_frame_url : "",
+    reference_frame_b64: typeof raw.reference_frame_b64 === "string" ? raw.reference_frame_b64 : "",
+    reference_frame_timestamp: typeof raw.reference_frame_timestamp === "number" ? raw.reference_frame_timestamp : 0,
     ok_criteria: typeof raw.ok_criteria === "string" ? raw.ok_criteria : "",
     ng_criteria: typeof raw.ng_criteria === "string" ? raw.ng_criteria : "",
+    start_sec: typeof raw.start_sec === "number" ? raw.start_sec : 0,
+    end_sec: typeof raw.end_sec === "number" ? raw.end_sec : 0,
+    segment_ids,
   };
+}
+
+function formatTimeSec(sec: number): string {
+  if (!sec) return "0:00";
+  const m = Math.floor(sec / 60);
+  const s = Math.floor(sec % 60);
+  return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
 const listLoading = ref(false);
@@ -281,7 +307,7 @@ function analysisDetailEntries(task: LearningTask): { key: string; value: string
       <h2>SOP 标准作业学习</h2>
     </div>
     <p class="page-desc">
-      三阶段流程：标准作业视频录入 → AI 自动分析与模板生成 → 步骤审核与确认
+      上传标准作业视频 → AI 自动分割动作段 → 逐段识别并生成 SOP → 人工审核与确认
     </p>
 
     <el-card class="section-card" shadow="never">
@@ -304,13 +330,14 @@ function analysisDetailEntries(task: LearningTask): { key: string; value: string
             <el-tag :type="statusTagType(row.status)" size="small">{{ statusLabel(row.status) }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="进度" min-width="160">
+        <el-table-column label="进度" min-width="200">
           <template #default="{ row }">
             <el-progress
               :percentage="Math.round((row.progress ?? 0) * 100)"
               :status="row.status === 'failed' ? 'exception' : undefined"
               :stroke-width="10"
             />
+            <span v-if="phaseProgress(row.status)" class="phase-hint">{{ phaseProgress(row.status) }}</span>
           </template>
         </el-table-column>
         <el-table-column label="创建时间" min-width="170">
@@ -409,44 +436,62 @@ function analysisDetailEntries(task: LearningTask): { key: string; value: string
             </el-collapse-item>
           </el-collapse>
 
-          <h4 class="steps-heading">识别步骤</h4>
+          <h4 class="steps-heading">识别步骤（{{ editingSteps.length }} 步）</h4>
           <el-timeline v-if="editingSteps.length">
             <el-timeline-item v-for="(step, idx) in editingSteps" :key="idx" :timestamp="`#${idx + 1}`" placement="top">
               <el-card shadow="hover" class="step-card">
-                <el-form label-width="120px" size="small" :disabled="!canEditSteps">
-                  <el-form-item label="名称">
-                    <el-input v-model="step.name" />
-                  </el-form-item>
-                  <el-form-item label="描述">
-                    <el-input v-model="step.description" type="textarea" :rows="2" />
-                  </el-form-item>
-                  <el-form-item label="动作类型">
-                    <el-input v-model="step.action_type" />
-                  </el-form-item>
-                  <el-form-item label="超时 (秒)">
-                    <el-input-number v-model="step.timeout_seconds" :min="1" :max="600" />
-                  </el-form-item>
-                  <el-form-item label="必选对象">
-                    <el-select
-                      v-model="step.required_objects"
-                      multiple
-                      filterable
-                      allow-create
-                      default-first-option
-                      placeholder="输入后回车添加"
-                      style="width: 100%"
-                    />
-                  </el-form-item>
-                  <el-form-item label="可选步骤">
-                    <el-switch v-model="step.is_optional" />
-                  </el-form-item>
-                  <el-form-item label="OK 判定">
-                    <el-input v-model="step.ok_criteria" type="textarea" :rows="2" />
-                  </el-form-item>
-                  <el-form-item label="NG 判定">
-                    <el-input v-model="step.ng_criteria" type="textarea" :rows="2" />
-                  </el-form-item>
-                </el-form>
+                <div class="step-card-body">
+                  <div v-if="step.reference_frame_b64" class="step-ref-frame">
+                    <img :src="'data:image/jpeg;base64,' + step.reference_frame_b64" alt="参考帧" />
+                    <span class="ref-frame-time">{{ formatTimeSec(step.reference_frame_timestamp) }}</span>
+                  </div>
+                  <div class="step-form-area">
+                    <div v-if="step.start_sec || step.end_sec" class="step-time-badge">
+                      {{ formatTimeSec(step.start_sec) }} ~ {{ formatTimeSec(step.end_sec) }}
+                    </div>
+                    <el-form label-width="120px" size="small" :disabled="!canEditSteps">
+                      <el-form-item label="名称">
+                        <el-input v-model="step.name" />
+                      </el-form-item>
+                      <el-form-item label="描述">
+                        <el-input v-model="step.description" type="textarea" :rows="2" />
+                      </el-form-item>
+                      <el-form-item label="动作类型">
+                        <el-select v-model="step.action_type" placeholder="选择类型" style="width: 100%">
+                          <el-option label="装配 (assemble)" value="assemble" />
+                          <el-option label="检查 (inspect)" value="inspect" />
+                          <el-option label="取料 (pick)" value="pick" />
+                          <el-option label="放置 (place)" value="place" />
+                          <el-option label="拧螺丝 (screw)" value="screw" />
+                          <el-option label="其他 (other)" value="other" />
+                        </el-select>
+                      </el-form-item>
+                      <el-form-item label="超时 (秒)">
+                        <el-input-number v-model="step.timeout_seconds" :min="1" :max="600" />
+                      </el-form-item>
+                      <el-form-item label="必选对象">
+                        <el-select
+                          v-model="step.required_objects"
+                          multiple
+                          filterable
+                          allow-create
+                          default-first-option
+                          placeholder="输入后回车添加"
+                          style="width: 100%"
+                        />
+                      </el-form-item>
+                      <el-form-item label="可选步骤">
+                        <el-switch v-model="step.is_optional" />
+                      </el-form-item>
+                      <el-form-item label="OK 判定">
+                        <el-input v-model="step.ok_criteria" type="textarea" :rows="2" placeholder="合格判定标准（如：螺丝完全拧入，与表面齐平）" />
+                      </el-form-item>
+                      <el-form-item label="NG 判定">
+                        <el-input v-model="step.ng_criteria" type="textarea" :rows="2" placeholder="不合格判定标准（如：螺丝凸出、歪斜或未拧紧）" />
+                      </el-form-item>
+                    </el-form>
+                  </div>
+                </div>
               </el-card>
             </el-timeline-item>
           </el-timeline>
@@ -510,6 +555,13 @@ function analysisDetailEntries(task: LearningTask): { key: string; value: string
   color: var(--el-text-color-secondary);
 }
 
+.phase-hint {
+  display: block;
+  font-size: 11px;
+  color: var(--el-text-color-secondary);
+  margin-top: 2px;
+}
+
 .mono {
   font-family: ui-monospace, monospace;
   font-size: 12px;
@@ -548,9 +600,62 @@ function analysisDetailEntries(task: LearningTask): { key: string; value: string
   gap: 12px;
 }
 
+.step-card-body {
+  display: flex;
+  gap: 16px;
+}
+
+.step-ref-frame {
+  flex-shrink: 0;
+  width: 160px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.step-ref-frame img {
+  width: 160px;
+  border-radius: 6px;
+  border: 1px solid var(--el-border-color-lighter);
+  object-fit: cover;
+}
+
+.ref-frame-time {
+  font-size: 11px;
+  color: var(--el-text-color-secondary);
+  font-family: ui-monospace, monospace;
+}
+
+.step-form-area {
+  flex: 1;
+  min-width: 0;
+}
+
+.step-time-badge {
+  display: inline-block;
+  margin-bottom: 8px;
+  padding: 2px 10px;
+  background: var(--el-color-primary-light-9);
+  color: var(--el-color-primary);
+  border-radius: 10px;
+  font-size: 12px;
+  font-family: ui-monospace, monospace;
+}
+
 @media (max-width: 768px) {
   .sop-learning-page {
     padding: 12px;
+  }
+  .step-card-body {
+    flex-direction: column;
+  }
+  .step-ref-frame {
+    width: 100%;
+  }
+  .step-ref-frame img {
+    width: 100%;
+    max-height: 200px;
   }
 }
 </style>

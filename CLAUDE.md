@@ -17,7 +17,7 @@
 - **生产环境必须**启用客户端认证（`password_file` / ACL 等）与 **TLS**；部署前请按 `deploy/mosquitto.conf` 内注释示例调整并管理证书与账号。
 
 ## 技术栈
-- **边缘端**：Python 3.12, OpenCV, YOLOv11 (TensorRT), Qwen2-VL (Ollama), Redis, SQLite
+- **边缘端**：Python 3.12, OpenCV, YOLOv11 (TensorRT), Qwen3-VL (Ollama), Redis, SQLite
 - **服务端**：FastAPI, SQLAlchemy 2.0 (asyncpg), PostgreSQL, MinIO, MQTT (Mosquitto)
 - **前端**：Vue 3, TypeScript, Element Plus, Pinia, ECharts, WebSocket
 - **部署**：Docker Compose, Prometheus + Grafana

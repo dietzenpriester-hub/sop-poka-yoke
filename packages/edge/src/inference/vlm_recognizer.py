@@ -97,14 +97,16 @@ class VLMClient:
         steps = ctx.get("steps", [])
         expected = steps[current].get("name", "未知") if current < len(steps) else "未知"
         expected_desc = steps[current].get("description", "") if current < len(steps) else ""
+        desc_line = f"\n说明：{expected_desc}" if expected_desc else ""
         return (
-            f"You are an SOP action verification expert.\n"
-            f"Expected step {current + 1}: {expected}\n"
-            f"Description: {expected_desc}\n\n"
-            "Look at the image carefully. Is the operator ACTUALLY performing this specific step right now?\n"
-            "Be strict: only return matches_expected=true if you clearly see the action being done.\n"
-            "Return only valid JSON with these exact keys:\n"
-            '{"action": "<describe what you actually see>", "matches_expected": <true or false>, "confidence": <0.0 to 1.0>}'
+            f"你是SOP动作验证专家。当前期望步骤：{expected}{desc_line}\n\n"
+            "仔细观察图片中操作员正在执行的具体动作。\n"
+            "判定规则：\n"
+            "- matches_expected=true: 操作员正在主动执行该步骤的核心动作（手部有明确的操作行为）\n"
+            "- matches_expected=false: 操作员处于等待、观察、空闲状态，或在执行其他不相关的操作\n"
+            "注意：仅仅站在工位前、看着设备、或手放在设备附近不算在执行步骤。\n\n"
+            "只返回JSON，格式如下：\n"
+            '{"action": "<描述你看到的具体动作>", "matches_expected": true或false, "confidence": 0.0到1.0}'
         )
 
     def _build_global_prompt(self, ctx: dict) -> str:

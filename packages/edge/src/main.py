@@ -35,18 +35,19 @@ EDGE_ROOT = Path(__file__).resolve().parents[1]
 REPO_ROOT = EDGE_ROOT.parent.parent
 
 
-def _load_sop_template() -> dict:
+def _load_sop_template(template_id: int | str | None = None) -> dict:
     """从 Server 边缘端专用接口拉取 SOP 模板（共享密钥认证，无需用户登录）。
 
-    模板选取：SOP_TEMPLATE_ID 指定 > 自动选取第一个激活模板。
-    失败时回退到本地演示模板。
+    参数 template_id 优先级最高，其次读取环境变量 SOP_TEMPLATE_ID，
+    都未指定时自动选取第一个激活模板。失败时回退到本地演示模板。
     """
     import requests
 
     api_base = os.environ.get("SOP_API_BASE", "http://localhost:8000")
     edge_secret = os.environ.get("SOP_EDGE_SECRET", "sop-edge-internal-secret")
-    template_id = os.environ.get("SOP_TEMPLATE_ID", "")
     headers = {"X-Edge-Secret": edge_secret}
+
+    tid = str(template_id) if template_id else os.environ.get("SOP_TEMPLATE_ID", "")
 
     def _fetch(url: str) -> dict | list | None:
         try:
@@ -58,15 +59,13 @@ def _load_sop_template() -> dict:
             logger.warning("请求异常: {} — {}", url, e)
         return None
 
-    # 按指定 ID 加载
-    if template_id:
-        data = _fetch(f"{api_base}/api/edge/sop-templates/{template_id}")
+    if tid:
+        data = _fetch(f"{api_base}/api/edge/sop-templates/{tid}")
         if data and isinstance(data, dict):
-            logger.info("从 API 加载 SOP 模板: {} (ID={})", data.get("name"), template_id)
+            logger.info("从 API 加载 SOP 模板: {} (ID={})", data.get("name"), tid)
             return data
-        logger.warning("指定模板 ID={} 加载失败，尝试自动选取", template_id)
+        logger.warning("指定模板 ID={} 加载失败，尝试自动选取", tid)
 
-    # 自动选取第一个激活模板
     templates = _fetch(f"{api_base}/api/edge/sop-templates")
     if isinstance(templates, list):
         if templates:
@@ -75,7 +74,6 @@ def _load_sop_template() -> dict:
             return tpl
         logger.warning("服务端无激活 SOP 模板")
 
-    # 兜底演示模板
     logger.warning("回退至本地演示模板，请确保服务端可访问")
     return {
         "name": "演示 SOP",
@@ -129,13 +127,16 @@ def _try_init_vlm():
 
 
 class _VLMWorker:
-    """在独立线程中异步执行 VLM 推理，避免阻塞主循环。"""
+    """在独立线程中异步执行 VLM 推理，推理完成即可接受下一帧。"""
 
     def __init__(self, vlm):
         self._vlm = vlm
         self._request_q: Queue = Queue(maxsize=1)
         self._result_q: Queue = Queue(maxsize=1)
         self._running = True
+        self._busy = False
+        self._infer_count = 0
+        self._total_infer_ms = 0.0
         self._thread = threading.Thread(target=self._run, daemon=True)
         self._thread.start()
 
@@ -145,17 +146,33 @@ class _VLMWorker:
                 frames, context = self._request_q.get(timeout=1.0)
             except Empty:
                 continue
+            self._busy = True
+            t0 = time.monotonic()
             try:
                 result = self._vlm.classify_action(frames, context)
             except Exception as e:
                 logger.error("VLM 推理异常: {}", e)
                 result = {"action": "unknown", "confidence": 0}
+            elapsed = (time.monotonic() - t0) * 1000
+            self._infer_count += 1
+            self._total_infer_ms += elapsed
+            result["_infer_ms"] = round(elapsed)
             while not self._result_q.empty():
                 try:
                     self._result_q.get_nowait()
                 except Empty:
                     break
             self._result_q.put(result)
+            self._busy = False
+
+    @property
+    def is_idle(self) -> bool:
+        """VLM 线程空闲且无待处理请求时返回 True。"""
+        return not self._busy and self._request_q.empty()
+
+    @property
+    def avg_infer_ms(self) -> float:
+        return self._total_infer_ms / max(self._infer_count, 1)
 
     def submit(self, frames, context):
         """提交推理请求（丢弃旧请求，只保留最新一帧）。"""
@@ -253,6 +270,37 @@ def main() -> None:
         ok, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, _SNAPSHOT_QUALITY])
         return base64.b64encode(buf).decode("ascii") if ok else ""
 
+    _DET_COLORS = {
+        "person": (0, 255, 0),
+        "default": (255, 165, 0),
+    }
+
+    def _draw_detections(frame: np.ndarray, dets: list) -> np.ndarray:
+        """在帧上绘制 YOLO 检测框和标签。"""
+        overlay = frame.copy()
+        for d in dets:
+            if isinstance(d, dict):
+                bbox = d.get("bbox", d.get("xyxy", []))
+                label = d.get("class_name", d.get("label", ""))
+                conf = d.get("confidence", 0)
+            else:
+                bbox = getattr(d, "bbox", getattr(d, "xyxy", []))
+                label = getattr(d, "class_name", getattr(d, "label", ""))
+                conf = getattr(d, "confidence", 0)
+            if len(bbox) < 4:
+                continue
+            x1, y1, w_or_x2, h_or_y2 = int(bbox[0]), int(bbox[1]), int(bbox[2]), int(bbox[3])
+            if w_or_x2 < x1:
+                continue
+            x2, y2 = x1 + w_or_x2, y1 + h_or_y2
+            color = _DET_COLORS.get(label, _DET_COLORS["default"])
+            cv2.rectangle(overlay, (x1, y1), (x2, y2), color, 2)
+            text = f"{label} {conf:.0%}"
+            (tw, th), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
+            cv2.rectangle(overlay, (x1, y1 - th - 6), (x1 + tw + 4, y1), color, -1)
+            cv2.putText(overlay, text, (x1 + 2, y1 - 4), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+        return overlay
+
     def send_detection(payload: dict) -> None:
         topic = f"{mqtt_prefix}/{station_id}/detection"
         if mqtt_client:
@@ -289,9 +337,10 @@ def main() -> None:
     global_detect = os.environ.get("SOP_GLOBAL_DETECT", "0") == "1"
     fsm = SOPStateMachine(
         _load_sop_template(),
-        debounce_seconds=float(os.environ.get("SOP_DEBOUNCE_SEC", "0.5")),
-        ng_tolerance=int(os.environ.get("SOP_NG_TOLERANCE", "3")),
+        debounce_seconds=float(os.environ.get("SOP_DEBOUNCE_SEC", "1.0")),
+        ng_tolerance=int(os.environ.get("SOP_NG_TOLERANCE", "5")),
         global_detect=global_detect,
+        min_consecutive_pass=int(os.environ.get("SOP_MIN_PASS", "3")),
     )
 
     # 后台轮询：IDLE 时每 5 秒查询服务端是否有待处理工单
@@ -315,6 +364,11 @@ def main() -> None:
                     wo = resp.json().get("workorder")
                     if wo and wo.get("sn") and wo["sn"] != _last_polled_sn[0]:
                         _last_polled_sn[0] = wo["sn"]
+                        tpl_id = wo.get("sop_template_id")
+                        if tpl_id:
+                            tpl = _load_sop_template(template_id=tpl_id)
+                            fsm.load_template(tpl)
+                            logger.info("轮询发现工单 sn={}，已加载模板 ID={}", wo["sn"], tpl_id)
                         try:
                             _workorder_queue.put_nowait(wo["sn"])
                         except Exception:
@@ -336,6 +390,11 @@ def main() -> None:
             if fsm.status != SOPStatus.IDLE:
                 logger.warning("当前状态 {} 非 IDLE，无法启动新工单", fsm.status)
                 return
+            tpl_id = payload.get("sop_template_id")
+            if tpl_id:
+                tpl = _load_sop_template(template_id=tpl_id)
+                fsm.load_template(tpl)
+                logger.info("工单指定模板 ID={}，已重载: {}", tpl_id, tpl.get("name"))
             fsm.start(sn)
             logger.info("工单已启动: {}", sn)
             alerter.alert_warning()
@@ -365,13 +424,13 @@ def main() -> None:
     else:
         logger.info("边缘端就绪，等待工单启动指令（MQTT command: start_workorder）")
 
-    vlm_min_interval = float(os.environ.get("SOP_VLM_INTERVAL", "3.0"))
     mqtt_min_interval = float(os.environ.get("SOP_MQTT_INTERVAL", "1.0"))
-    last_vlm_submit_time = 0.0
+    vlm_idle_max = float(os.environ.get("SOP_VLM_IDLE_MAX", "5.0"))
     last_mqtt_send_time = 0.0
+    last_vlm_submit_time = 0.0
 
     logger.info("═══ 开始实时检测循环 ═══")
-    logger.info("  VLM 最小间隔: {}s, MQTT 最小间隔: {}s", vlm_min_interval, mqtt_min_interval)
+    logger.info("  VLM 模式: 推理完成即提交 (空闲超过{}s强制提交), MQTT 最小间隔: {}s", vlm_idle_max, mqtt_min_interval)
     detect_count = 0
 
     try:
@@ -408,9 +467,11 @@ def main() -> None:
                 continue
 
             frame, ts = item
-            mjpeg.update_frame(frame)
+            _last_dets: list = []
+            result = {}
+
             if fsm.status == SOPStatus.IDLE:
-                # 消费轮询到的工单（非阻塞）
+                mjpeg.update_frame(frame)
                 try:
                     polled_sn = _workorder_queue.get_nowait()
                     logger.info("轮询启动工单: {}", polled_sn)
@@ -420,11 +481,109 @@ def main() -> None:
                     pass
                 recorder.feed(frame, ts)
                 continue
+
+            # 定期发送状态心跳（即使在 TIMEOUT/STEP_NG/无运动时），确保前端始终可感知
+            _heartbeat_interval = 2.0
+            now_hb = time.monotonic()
+            if now_hb - last_mqtt_send_time >= _heartbeat_interval:
+                snapshot_b64 = _encode_snapshot(frame)
+                cur_step = fsm.get_current_step()
+                status_msg = {
+                    "type": "sop_status",
+                    "station_id": station_id,
+                    "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+                    "work_order_sn": fsm.work_order_sn or "",
+                    "sop_name": getattr(fsm, "template_name", ""),
+                    "total_steps": len(fsm.steps),
+                    "step_names": [s.name for s in fsm.steps],
+                    "current_step_index": fsm.current_step_index,
+                    "current_step_name": cur_step.name if cur_step else "",
+                    "status": fsm.status.value if hasattr(fsm.status, "value") else str(fsm.status),
+                    "event": "heartbeat",
+                    "vlm_action": "",
+                    "vlm_confidence": 0.0,
+                    "vlm_matches": False,
+                    "yolo_objects": [],
+                    "snapshot": snapshot_b64,
+                }
+                if fsm.global_detect:
+                    status_msg["completed_indices"] = sorted(fsm.completed_indices)
+                    status_msg["completed_count"] = len(fsm.completed_indices)
+                send_status(status_msg)
+                last_mqtt_send_time = now_hb
+
             if fsm.status == SOPStatus.TIMEOUT:
-                recorder.feed(frame, ts)
-                continue
+                fsm.status = SOPStatus.RUNNING
+                fsm._step_start_time = time.time()
+                logger.info("步骤超时自动恢复: TIMEOUT → RUNNING（继续检测）")
+
+            # VLM 结果轮询（不受运动检测约束，确保推理完成后立即处理）
+            vlm_action_text = ""
+            vlm_confidence = 0.0
+            vlm_matches = False
+            if vlm_worker:
+                action = vlm_worker.poll_result()
+                if action is not None:
+                    infer_ms = action.pop("_infer_ms", 0)
+                    vlm_action_text = action.get("action", "")
+                    vlm_confidence = float(action.get("confidence", 0))
+                    vlm_matches = bool(action.get("matches_expected", False))
+                    logger.info("VLM 动作识别: {} (conf={:.2f}, {}ms, avg {}ms)",
+                                vlm_action_text, vlm_confidence, infer_ms,
+                                round(vlm_worker.avg_infer_ms))
+                    if fsm.global_detect:
+                        result = fsm.process_global_action(action)
+                    else:
+                        result = fsm.process_action(action)
+
+                    cur_step = fsm.get_current_step()
+                    snapshot_b64 = _encode_snapshot(frame)
+                    send_detection({
+                        "station_id": station_id,
+                        "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+                        "detect_count": detect_count,
+                        "detections": _last_dets,
+                        "yolo_objects": [],
+                        "vlm_action": vlm_action_text,
+                        "vlm_confidence": vlm_confidence,
+                        "vlm_matches": vlm_matches,
+                        "snapshot": snapshot_b64,
+                        "sop_status": fsm.status.value if hasattr(fsm.status, "value") else str(fsm.status),
+                        "sop_step_index": fsm.current_step_index,
+                        "sop_step_name": cur_step.name if cur_step else "",
+                        "sop_total_steps": len(fsm.steps),
+                        "event": result.get("event", ""),
+                    })
+                    last_mqtt_send_time = time.monotonic()
+
+            def _try_submit_vlm(f):
+                nonlocal last_vlm_submit_time
+                if not vlm_worker or not vlm_worker.is_idle:
+                    return
+                if fsm.status not in (SOPStatus.RUNNING,):
+                    return
+                sop_ctx = {
+                    "steps": [
+                        {"name": s.name, "description": s.description,
+                         "required_objects": s.required_objects,
+                         "action_type": s.action_type,
+                         "timeout_seconds": s.timeout_seconds,
+                         "is_optional": s.is_optional}
+                        for s in fsm.steps
+                    ],
+                    "current_step_index": fsm.current_step_index,
+                }
+                if fsm.global_detect:
+                    sop_ctx["global_detect"] = True
+                    sop_ctx["completed_indices"] = list(fsm.completed_indices)
+                vlm_worker.submit([f], sop_ctx)
+                last_vlm_submit_time = time.monotonic()
 
             if not motion.is_keyframe(frame):
+                # 即使无运动，VLM 空闲超过阈值也强制提交当前帧
+                if vlm_worker and vlm_worker.is_idle and (time.monotonic() - last_vlm_submit_time) >= vlm_idle_max:
+                    _try_submit_vlm(frame)
+                mjpeg.update_frame(frame)
                 recorder.feed(frame, ts)
                 continue
 
@@ -433,52 +592,16 @@ def main() -> None:
             detect_count += 1
 
             det_dicts = [dataclasses.asdict(d) for d in dets] if isinstance(dets, list) else []
+            mjpeg.update_frame(_draw_detections(frame, det_dicts))
             det_classes = [
                 d.get("class_name", d.get("label", "")) for d in det_dicts
             ] if det_dicts else []
 
-            vlm_action_text = ""
-            vlm_confidence = 0.0
-            vlm_matches = False
-            if vlm_worker:
-                now_vlm = time.monotonic()
-                if now_vlm - last_vlm_submit_time >= vlm_min_interval:
-                    sop_ctx = {
-                        "steps": [
-                            {"name": s.name, "description": s.description,
-                             "required_objects": s.required_objects,
-                             "action_type": s.action_type,
-                             "timeout_seconds": s.timeout_seconds,
-                             "is_optional": s.is_optional}
-                            for s in fsm.steps
-                        ],
-                        "current_step_index": fsm.current_step_index,
-                    }
-                    if fsm.global_detect:
-                        sop_ctx["global_detect"] = True
-                        sop_ctx["completed_indices"] = list(fsm.completed_indices)
-                    vlm_worker.submit([frame], sop_ctx)
-                    last_vlm_submit_time = now_vlm
-                action = vlm_worker.poll_result()
-                if action is not None:
-                    vlm_action_text = action.get("action", "")
-                    vlm_confidence = float(action.get("confidence", 0))
-                    vlm_matches = bool(action.get("matches_expected", False))
-                    logger.info("VLM 动作识别: {} (conf={:.2f})",
-                                vlm_action_text, vlm_confidence)
-                    if fsm.global_detect:
-                        result = fsm.process_global_action(action)
-                    else:
-                        result = fsm.process_action(action)
-                else:
-                    result = {"event": "vlm_pending"}
-            else:
-                result = {"event": "yolo_only"}
+            _try_submit_vlm(frame)
 
-            # MQTT 消息节流：限制发送频率避免压垮 broker
+            # MQTT 消息节流：YOLO 检测结果定期发送
             now_mqtt = time.monotonic()
-            is_important = result.get("event") in ("step_ok", "step_ng", "complete", "override_ok")
-            if is_important or (now_mqtt - last_mqtt_send_time >= mqtt_min_interval):
+            if now_mqtt - last_mqtt_send_time >= mqtt_min_interval:
                 snapshot_b64 = _encode_snapshot(frame)
                 send_detection({
                     "station_id": station_id,
@@ -501,7 +624,7 @@ def main() -> None:
                     "current_step_index": fsm.current_step_index,
                     "current_step_name": cur_step.name if cur_step else "",
                     "status": fsm.status.value if hasattr(fsm.status, "value") else str(fsm.status),
-                    "event": result.get("event", ""),
+                    "event": "yolo_detect",
                     "vlm_action": vlm_action_text,
                     "vlm_confidence": vlm_confidence,
                     "vlm_matches": vlm_matches,
@@ -515,10 +638,10 @@ def main() -> None:
                 last_mqtt_send_time = now_mqtt
 
             if result.get("type") == "blocked":
-                if os.environ.get("SOP_AUTO_START") == "1" and fsm.status in (SOPStatus.STEP_NG, SOPStatus.TIMEOUT):
+                if fsm.status in (SOPStatus.STEP_NG, SOPStatus.TIMEOUT):
                     fsm.status = SOPStatus.RUNNING
                     fsm._step_start_time = time.time()
-                    logger.info("自动重试: {} → RUNNING（测试模式）", fsm.status.value)
+                    logger.info("自动恢复: STEP_NG/TIMEOUT → RUNNING（继续检测）")
                 else:
                     logger.debug("状态机已阻塞: {}", result.get("reason", ""))
                 recorder.feed(frame, ts)

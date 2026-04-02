@@ -69,15 +69,17 @@ class LearningService:
             nonlocal _last_commit_progress
             task.progress = progress
             task.analysis_detail = {**(task.analysis_detail or {}), **detail, "phase": phase_name}
-            if progress < 0.25:
+            if progress < 0.15:
                 task.status = "phase_1"
-            elif progress < 0.50:
+            elif progress < 0.30:
                 task.status = "phase_2"
-            elif progress < 0.85:
+            elif progress < 0.75:
                 task.status = "phase_3"
-            elif progress < 1.0:
+            elif progress < 0.90:
                 task.status = "phase_4"
-            if progress - _last_commit_progress >= 0.05 or progress >= 1.0:
+            elif progress < 1.0:
+                task.status = "phase_5"
+            if progress - _last_commit_progress >= 0.03 or progress >= 1.0:
                 _last_commit_progress = progress
                 await db.commit()
 

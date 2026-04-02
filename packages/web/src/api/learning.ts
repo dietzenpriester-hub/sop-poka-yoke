@@ -9,8 +9,13 @@ export interface LearningStep {
   timeout_seconds: number;
   is_optional: boolean;
   reference_frame_url: string;
+  reference_frame_b64: string;
+  reference_frame_timestamp: number;
   ok_criteria: string;
   ng_criteria: string;
+  start_sec: number;
+  end_sec: number;
+  segment_ids: number[];
 }
 
 export interface LearningTask {

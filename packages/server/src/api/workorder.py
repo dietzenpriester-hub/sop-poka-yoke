@@ -63,9 +63,13 @@ async def start_workorder(
 
             if _mqtt_client:
                 topic = f"{settings.MQTT_TOPIC_PREFIX}/{edge_id}/command"
-                payload = json.dumps({"command": "start_workorder", "work_order_sn": wo.sn})
+                payload = json.dumps({
+                    "command": "start_workorder",
+                    "work_order_sn": wo.sn,
+                    "sop_template_id": wo.sop_template_id,
+                })
                 _mqtt_client.publish(topic, payload)
-                logger.info("已向边缘端 {} 发送 start_workorder: {}", edge_id, wo.sn)
+                logger.info("已向边缘端 {} 发送 start_workorder: sn={}, template_id={}", edge_id, wo.sn, wo.sop_template_id)
         except Exception as e:
             logger.warning("发送 start_workorder 指令失败: {}", e)
 

@@ -45,10 +45,12 @@ async def get_active_workorder(
     from src.models.station import Station
     from src.models.workorder import WorkOrder
 
+    # 支持三种 Station ID 匹配：edge_device_id、name、str(id)
+    conditions = [Station.edge_device_id == station_id, Station.name == station_id]
+    if station_id.isdigit():
+        conditions.append(Station.id == int(station_id))
     st_r = await db.execute(
-        select(Station).where(
-            or_(Station.edge_device_id == station_id, Station.name == station_id),
-        ).limit(1),
+        select(Station).where(or_(*conditions)).limit(1),
     )
     station = st_r.scalar_one_or_none()
     if not station:
@@ -64,7 +66,12 @@ async def get_active_workorder(
     if not wo:
         return {"workorder": None}
 
-    return {"workorder": {"id": wo.id, "sn": wo.sn, "status": wo.status}}
+    return {"workorder": {
+        "id": wo.id,
+        "sn": wo.sn,
+        "status": wo.status,
+        "sop_template_id": wo.sop_template_id,
+    }}
 
 
 @router.get("/sop-templates/{template_id}")

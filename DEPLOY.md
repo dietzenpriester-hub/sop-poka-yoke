@@ -52,7 +52,7 @@
 | 组件 | 技术栈 | 运行位置 |
 |------|--------|---------|
 | **Server** | FastAPI + PostgreSQL + Redis + MinIO + MQTT | 中央服务器 (Docker) |
-| **Edge** | Python + YOLO11 + Qwen2.5-VL + OpenCV | 每个工位的边缘计算盒 |
+| **Edge** | Python + YOLO11 + Qwen3-VL + OpenCV | 每个工位的边缘计算盒 |
 | **Web** | Vue 3 + Element Plus + Nginx | 中央服务器 (Docker) |
 | **Monitoring** | Prometheus + Grafana | 中央服务器 (Docker, 可选) |
 
@@ -265,7 +265,7 @@ mkdir -p models/
 
 # VLM (Ollama)
 curl -fsSL https://ollama.com/install.sh | sh
-ollama pull qwen2.5-vl:7b
+ollama pull qwen3-vl:8b-instruct
 ```
 
 ### 6.4 配置边缘端
@@ -282,7 +282,7 @@ SOP_MINIO_ACCESS_KEY=minioadmin
 SOP_MINIO_SECRET_KEY=<与服务器一致>
 SOP_API_BASE=http://10.10.10.100:8000
 SOP_OLLAMA_URL=http://localhost:11434
-SOP_VLM_MODEL=qwen2.5-vl:7b
+SOP_VLM_MODEL=qwen3-vl:8b-instruct
 SOP_YOLO_MODEL=yolo11n.pt
 EOF
 ```

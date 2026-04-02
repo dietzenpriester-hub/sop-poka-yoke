@@ -51,14 +51,15 @@ async def _handle_alert(station_id: str, payload: dict) -> None:
                 if cached_sid is not None:
                     alert.station_id = cached_sid
             else:
+                conditions = [
+                    Station.edge_device_id == station_id,
+                    Station.name == station_id,
+                    Station.edge_device_id == f"edge-{station_id}",
+                ]
+                if station_id.isdigit():
+                    conditions.append(Station.id == int(station_id))
                 st_r = await session.execute(
-                    select(Station).where(
-                        or_(
-                            Station.edge_device_id == station_id,
-                            Station.name == station_id,
-                            Station.edge_device_id == f"edge-{station_id}",
-                        ),
-                    ).limit(1),
+                    select(Station).where(or_(*conditions)).limit(1),
                 )
                 station_row = st_r.scalar_one_or_none()
                 if len(_station_cache) >= _STATION_CACHE_MAX:
@@ -111,14 +112,15 @@ async def _validate_station(station_id: str) -> bool:
     from src.models.station import Station
     try:
         async with async_session_factory() as session:
+            conditions = [
+                Station.edge_device_id == station_id,
+                Station.name == station_id,
+                Station.edge_device_id == f"edge-{station_id}",
+            ]
+            if station_id.isdigit():
+                conditions.append(Station.id == int(station_id))
             st_r = await session.execute(
-                select(Station.id).where(
-                    or_(
-                        Station.edge_device_id == station_id,
-                        Station.name == station_id,
-                        Station.edge_device_id == f"edge-{station_id}",
-                    ),
-                ).limit(1),
+                select(Station.id).where(or_(*conditions)).limit(1),
             )
             row = st_r.scalar_one_or_none()
             if len(_station_cache) >= _STATION_CACHE_MAX:
@@ -138,14 +140,15 @@ async def _resolve_ws_station_ids(station_id: str) -> list[str]:
     from src.models.station import Station
     try:
         async with async_session_factory() as session:
+            conditions = [
+                Station.edge_device_id == station_id,
+                Station.name == station_id,
+                Station.edge_device_id == f"edge-{station_id}",
+            ]
+            if station_id.isdigit():
+                conditions.append(Station.id == int(station_id))
             st_r = await session.execute(
-                select(Station).where(
-                    or_(
-                        Station.edge_device_id == station_id,
-                        Station.name == station_id,
-                        Station.edge_device_id == f"edge-{station_id}",
-                    ),
-                ).limit(1),
+                select(Station).where(or_(*conditions)).limit(1),
             )
             row = st_r.scalar_one_or_none()
             if row:

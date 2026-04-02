@@ -13,8 +13,13 @@ class LearningStepItem(BaseModel):
     timeout_seconds: int = 30
     is_optional: bool = False
     reference_frame_url: str = ""
+    reference_frame_b64: str = ""
+    reference_frame_timestamp: float = 0.0
     ok_criteria: str = ""
     ng_criteria: str = ""
+    start_sec: float = 0.0
+    end_sec: float = 0.0
+    segment_ids: list[int] = []
 
 
 class LearningTaskResponse(BaseModel):

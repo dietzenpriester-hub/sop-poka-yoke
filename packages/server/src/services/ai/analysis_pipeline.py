@@ -1,17 +1,27 @@
-"""SOP 学习分析管线 — 编排帧提取、YOLO 检测、VLM 分析四阶段流程"""
+"""SOP 学习分析管线 — 编排帧提取、YOLO 检测、VLM 分析
+
+对标 ActionInsight 的核心改进：
+- 时序动作分割：自动将视频切分为动作段
+- 逐段 VLM 分析：每个动作段独立识别
+- 累积上下文：后续段携带前序结果，避免重复
+- 参考帧绑定：每个步骤关联最佳参考帧
+- 支持 20 分钟以上长视频
+"""
 
 from __future__ import annotations
 
 import asyncio
+import base64
 import tempfile
 from typing import Any, Callable, Coroutine
 
+import cv2
 from loguru import logger
 from minio import Minio
 
 from src.core.config import settings
 
-from .frame_extractor import FrameExtractor
+from .frame_extractor import ActionSegment, ExtractionResult, FrameExtractor
 from .vlm_service import VLMService
 from .yolo_service import YOLOService
 
@@ -19,12 +29,13 @@ ProgressCallback = Callable[[float, str, dict[str, Any]], Coroutine[Any, Any, No
 
 
 class AnalysisPipeline:
-    """四阶段 SOP 学习分析管线。
+    """五阶段 SOP 学习分析管线。
 
-    Phase 1 (0-25%):  视频帧提取 (OpenCV)
-    Phase 2 (25-50%): YOLO 物体检测
-    Phase 3 (50-85%): VLM 视觉语言分析
-    Phase 4 (85-100%): 步骤组装与优化
+    Phase 1 (0-15%):   视频下载 + 帧提取 + 运动分析 + 动作分割
+    Phase 2 (15-30%):  YOLO 物体检测
+    Phase 3 (30-75%):  VLM 逐段动作识别（核心）
+    Phase 4 (75-90%):  步骤组装 + VLM 精炼
+    Phase 5 (90-100%): 参考帧绑定 + 最终输出
     """
 
     def __init__(
@@ -66,8 +77,8 @@ class AnalysisPipeline:
                 f"请确认 Ollama 正在运行且已拉取模型。"
             )
 
-        # --- Phase 1: Download + Frame Extraction ---
-        await _report(0.02, "视频下载中", {"current_phase": 1, "total_phases": 4})
+        # === Phase 1: Download + Frame Extraction + Motion Segmentation ===
+        await _report(0.02, "视频下载中", {"current_phase": 1, "total_phases": 5})
 
         loop = asyncio.get_running_loop()
         tmp = tempfile.NamedTemporaryFile(suffix=".mp4", delete=False)
@@ -75,9 +86,9 @@ class AnalysisPipeline:
         tmp.close()
         try:
             await self._download_from_minio(video_minio_path, tmp_path)
-            await _report(0.08, "视频分帧与关键帧提取", {"current_phase": 1, "total_phases": 4})
+            await _report(0.05, "时序分析与动作分割", {"current_phase": 1, "total_phases": 5})
 
-            extraction = await loop.run_in_executor(
+            extraction: ExtractionResult = await loop.run_in_executor(
                 None, self.frame_extractor.extract, tmp_path,
             )
         finally:
@@ -90,18 +101,20 @@ class AnalysisPipeline:
         if not extraction.keyframes:
             raise ValueError("视频中未提取到任何关键帧，请检查视频文件是否有效。")
 
-        await _report(0.25, "帧提取完成", {
-            "current_phase": 1, "total_phases": 4,
-            "phase": "帧提取完成",
+        segments = extraction.segments
+
+        await _report(0.15, "动作分割完成", {
+            "current_phase": 1, "total_phases": 5,
+            "phase": "动作分割完成",
             "total_frames": extraction.total_frames,
             "fps": round(extraction.fps, 1),
             "duration_sec": round(extraction.duration_sec, 1),
-            "frames_extracted": extraction.total_frames,
-            "keyframes": len(extraction.keyframes),
+            "segments_count": len(segments),
+            "keyframes_count": len(extraction.keyframes),
         })
 
-        # --- Phase 2: YOLO Detection ---
-        await _report(0.27, "YOLO 目标检测", {"current_phase": 2, "total_phases": 4, "phase": "YOLO 目标检测"})
+        # === Phase 2: YOLO Detection ===
+        await _report(0.17, "YOLO 目标检测", {"current_phase": 2, "total_phases": 5, "phase": "YOLO 目标检测"})
 
         frames_bgr = [kf.frame_bgr for kf in extraction.keyframes]
 
@@ -113,35 +126,190 @@ class AnalysisPipeline:
         for fd in yolo_results:
             all_objects.update(fd.object_names)
 
-        await _report(0.50, "YOLO 检测完成", {
-            "current_phase": 2, "total_phases": 4,
+        segment_objects = self._collect_segment_objects(segments, yolo_results, extraction)
+
+        await _report(0.30, "YOLO 检测完成", {
+            "current_phase": 2, "total_phases": 5,
             "phase": "YOLO 检测完成",
             "objects_detected": sum(len(fd.detections) for fd in yolo_results),
             "unique_classes": list(all_objects),
         })
 
-        # --- Phase 3: VLM Analysis ---
-        await _report(0.52, "VLM 视觉分析", {"current_phase": 3, "total_phases": 4, "phase": "VLM 整体概览分析"})
+        # === Phase 3: VLM Segment-by-Segment Analysis (Core) ===
+        await _report(0.32, "VLM 概览分析", {"current_phase": 3, "total_phases": 5, "phase": "VLM 整体概览"})
 
-        # 3a. Overview
         sample_indices = [0, len(frames_bgr) // 2, len(frames_bgr) - 1]
         sample_frames = [frames_bgr[i] for i in sample_indices if i < len(frames_bgr)]
         overview = await self.vlm_service.analyze_overview(sample_frames, process_name)
         logger.info("VLM 概览: {}", overview[:200])
 
-        await _report(0.60, "VLM 逐帧分析", {"current_phase": 3, "total_phases": 4, "phase": "VLM 逐段步骤识别"})
+        await _report(0.38, "VLM 逐段分析", {"current_phase": 3, "total_phases": 5, "phase": "VLM 逐段动作识别"})
 
-        # 3b. Step detection
+        segment_results: list[dict] = []
+        previous_actions: list[str] = []
+
+        for i, seg in enumerate(segments):
+            seg_progress = 0.38 + (i / max(len(segments), 1)) * 0.37
+            await _report(
+                seg_progress,
+                f"分析动作段 {i + 1}/{len(segments)}",
+                {"current_phase": 3, "total_phases": 5, "phase": f"分析段 {i+1}/{len(segments)}"},
+            )
+
+            seg_frames = [kf.frame_bgr for kf in seg.keyframes]
+            if not seg_frames:
+                continue
+
+            seg_objs = segment_objects.get(seg.segment_id, [])
+
+            result = await self.vlm_service.analyze_segment(
+                frames=seg_frames,
+                segment_id=seg.segment_id,
+                start_sec=seg.start_sec,
+                end_sec=seg.end_sec,
+                process_name=process_name,
+                overview=overview,
+                detected_objects=seg_objs,
+                previous_actions=previous_actions,
+            )
+
+            segment_results.append(result)
+
+            if not result.get("is_same_as_previous"):
+                previous_actions.append(result.get("action", ""))
+
+        await _report(0.75, "VLM 逐段分析完成", {
+            "current_phase": 3, "total_phases": 5,
+            "phase": "VLM 逐段分析完成",
+            "segments_analyzed": len(segment_results),
+            "unique_actions": len(set(r.get("action", "") for r in segment_results)),
+        })
+
+        # === Phase 4: Step Assembly + Refinement ===
+        await _report(0.77, "步骤组装与判定标准生成", {
+            "current_phase": 4, "total_phases": 5,
+            "phase": "步骤组装与精炼",
+        })
+
+        if segment_results:
+            steps = await self.vlm_service.assemble_steps_from_segments(
+                segment_results, process_name, overview,
+            )
+        else:
+            logger.warning("无分段结果，回退到全局分析")
+            steps = await self._fallback_global_analysis(
+                frames_bgr, extraction, yolo_results, process_name, overview,
+            )
+
+        await _report(0.90, "步骤组装完成", {
+            "current_phase": 4, "total_phases": 5,
+            "phase": "步骤组装完成",
+            "step_count": len(steps),
+        })
+
+        # === Phase 5: Reference Frame Binding ===
+        await _report(0.92, "参考帧绑定", {
+            "current_phase": 5, "total_phases": 5,
+            "phase": "参考帧与截图绑定",
+        })
+
+        steps = self._bind_reference_frames(steps, segments, video_minio_path)
+
+        await _report(1.0, "分析完成", {
+            "current_phase": 5, "total_phases": 5,
+            "phase": "分析完成",
+            "step_count": len(steps),
+            "segments_count": len(segments),
+            "confidence": self._compute_overall_confidence(segment_results),
+        })
+
+        logger.info("分析管线完成: {} 个 SOP 步骤（{} 个动作段）", len(steps), len(segments))
+        return steps
+
+    @staticmethod
+    def _collect_segment_objects(
+        segments: list[ActionSegment],
+        yolo_results: list,
+        extraction: ExtractionResult,
+    ) -> dict[int, list[str]]:
+        """收集每个动作段中 YOLO 检测到的物体。"""
+        kf_index_to_yolo_idx: dict[int, int] = {}
+        for yi, kf in enumerate(extraction.keyframes):
+            kf_index_to_yolo_idx[kf.index] = yi
+
+        segment_objects: dict[int, list[str]] = {}
+        for seg in segments:
+            objects: set[str] = set()
+            for kf in seg.keyframes:
+                yolo_idx = kf_index_to_yolo_idx.get(kf.index)
+                if yolo_idx is not None and yolo_idx < len(yolo_results):
+                    objects.update(yolo_results[yolo_idx].object_names)
+            segment_objects[seg.segment_id] = list(objects)
+
+        return segment_objects
+
+    @staticmethod
+    def _bind_reference_frames(
+        steps: list[dict],
+        segments: list[ActionSegment],
+        video_minio_path: str,
+    ) -> list[dict]:
+        """为每个步骤绑定参考帧的 base64 缩略图。"""
+        seg_map = {seg.segment_id: seg for seg in segments}
+
+        for step in steps:
+            seg_ids = step.get("segment_ids", [])
+            if not seg_ids:
+                start_sec = step.get("start_sec", 0)
+                for seg in segments:
+                    if seg.start_sec <= start_sec <= seg.end_sec:
+                        seg_ids = [seg.segment_id]
+                        break
+
+            ref_frame = None
+            for sid in seg_ids:
+                seg = seg_map.get(sid)
+                if seg and seg.representative_frame:
+                    ref_frame = seg.representative_frame
+                    break
+
+            if ref_frame is not None:
+                h, w = ref_frame.frame_bgr.shape[:2]
+                thumb_w = min(320, w)
+                scale = thumb_w / w
+                thumb = cv2.resize(
+                    ref_frame.frame_bgr,
+                    (thumb_w, int(h * scale)),
+                    interpolation=cv2.INTER_AREA,
+                )
+                _, buffer = cv2.imencode(".jpg", thumb, [cv2.IMWRITE_JPEG_QUALITY, 70])
+                b64 = base64.b64encode(buffer).decode("utf-8")
+                step["reference_frame_b64"] = b64
+                step["reference_frame_timestamp"] = ref_frame.timestamp_sec
+            else:
+                step.setdefault("reference_frame_b64", "")
+                step.setdefault("reference_frame_timestamp", 0)
+
+        return steps
+
+    @staticmethod
+    def _compute_overall_confidence(segment_results: list[dict]) -> float:
+        if not segment_results:
+            return 0.0
+        confs = [r.get("confidence", 0.5) for r in segment_results if not r.get("is_same_as_previous")]
+        return round(sum(confs) / len(confs), 2) if confs else 0.5
+
+    async def _fallback_global_analysis(
+        self,
+        frames_bgr: list,
+        extraction: ExtractionResult,
+        yolo_results: list,
+        process_name: str,
+        overview: str,
+    ) -> list[dict]:
+        """回退到全局分析模式（兼容无分段时的场景）。"""
         timestamps = [kf.timestamp_sec for kf in extraction.keyframes]
         objects_per_frame = [fd.object_names for fd in yolo_results]
-
-        async def on_batch_progress(batch_idx: int, total_batches: int) -> None:
-            batch_progress = 0.60 + (batch_idx / max(total_batches, 1)) * 0.20
-            await _report(
-                batch_progress,
-                f"VLM 分析批次 {batch_idx + 1}/{total_batches}",
-                {"current_phase": 3, "total_phases": 4, "phase": f"VLM 分析 {batch_idx + 1}/{total_batches}"},
-            )
 
         raw_steps = await self.vlm_service.analyze_steps(
             frames=frames_bgr,
@@ -149,43 +317,14 @@ class AnalysisPipeline:
             detected_objects_per_frame=objects_per_frame,
             process_name=process_name,
             overview=overview,
-            on_batch_progress=on_batch_progress,
         )
 
-        await _report(0.80, "VLM 分析完成", {
-            "current_phase": 3, "total_phases": 4,
-            "phase": "VLM 分析完成",
-            "actions_classified": len(raw_steps),
-        })
-
-        # --- Phase 4: Refinement ---
-        await _report(0.85, "步骤优化与判定标准生成", {
-            "current_phase": 4, "total_phases": 4,
-            "phase": "步骤优化与判定标准生成",
-        })
-
         if raw_steps:
-            steps = await self.vlm_service.refine_steps(raw_steps, process_name, overview)
-        else:
-            logger.warning("VLM 未识别出任何步骤，尝试用概览+YOLO 生成步骤")
-            steps = await self._fallback_steps_with_overview(
-                overview, yolo_results, extraction, process_name,
-            )
+            return await self.vlm_service.refine_steps(raw_steps, process_name, overview)
 
-        await _report(1.0, "分析完成", {
-            "current_phase": 4, "total_phases": 4,
-            "phase": "分析完成",
-            "confidence": 0.9 if raw_steps else 0.5,
-        })
-
-        logger.info("分析管线完成: {} 个 SOP 步骤", len(steps))
-        return steps
+        return self._fallback_steps_from_yolo(yolo_results, extraction, process_name)
 
     async def _download_from_minio(self, minio_path: str, local_path: str) -> None:
-        """从 MinIO 下载视频文件到本地临时路径。
-
-        video_path 格式为 "bucket/object/key"，例如 "sop-learning/PCB-A100/xxx.mp4"
-        """
         client = Minio(
             settings.MINIO_ENDPOINT,
             access_key=settings.MINIO_ACCESS_KEY,
@@ -204,52 +343,6 @@ class AnalysisPipeline:
         await asyncio.get_running_loop().run_in_executor(
             None, client.fget_object, bucket, object_name, local_path,
         )
-
-    async def _fallback_steps_with_overview(
-        self,
-        overview: str,
-        yolo_results: list,
-        extraction,
-        process_name: str,
-    ) -> list[dict]:
-        """用 VLM 概览 + YOLO 检测结果请求 VLM 生成结构化步骤（纯文本模式，不传图片）。"""
-        all_objects: set[str] = set()
-        for fd in yolo_results:
-            all_objects.update(fd.object_names)
-
-        prompt = (
-            f"你是一个工业 SOP 专家。根据以下信息，为「{process_name}」工序生成操作步骤。\n\n"
-            f"操作概览（来自视频分析）：\n{overview}\n\n"
-        )
-        if all_objects:
-            prompt += f"视频中检测到的物体：{', '.join(sorted(all_objects))}\n\n"
-        prompt += (
-            "请输出 2~6 个操作步骤的 JSON 数组，格式如下：\n"
-            "[\n"
-            '  {"name": "步骤名", "description": "详细描述做什么", '
-            '"action_type": "动作类型", "required_objects": ["需要的物体"], '
-            '"timeout_seconds": 30, "ok_criteria": "合格标准", "ng_criteria": "不合格标准"}\n'
-            "]\n\n"
-            "仅输出 JSON 数组。"
-        )
-
-        try:
-            raw = await self.vlm_service._chat(prompt, [])
-            steps = self.vlm_service._parse_steps_json(raw)
-            if steps:
-                for i, step in enumerate(steps):
-                    step["index"] = i
-                    step.setdefault("timeout_seconds", 30)
-                    step.setdefault("is_optional", False)
-                    step.setdefault("ok_criteria", "")
-                    step.setdefault("ng_criteria", "")
-                    step.setdefault("reference_frame_url", "")
-                logger.info("概览+YOLO 回退生成 {} 个步骤", len(steps))
-                return steps
-        except Exception as e:
-            logger.warning("概览回退也失败: {}", e)
-
-        return self._fallback_steps_from_yolo(yolo_results, extraction, process_name)
 
     @staticmethod
     def _fallback_steps_from_yolo(

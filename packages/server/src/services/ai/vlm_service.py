@@ -1,4 +1,11 @@
-"""VLM 视觉语言分析服务 — 通过 Ollama API 调用 Qwen VL 系列模型"""
+"""VLM 视觉语言分析服务 — 通过 Ollama API 调用 Qwen VL 系列模型
+
+核心改进（对标 ActionInsight）：
+- 分段分析：逐个时序段识别动作，而非对整体采样
+- 累积上下文：后续段分析时携带前序段结果
+- 结构化输出：每段返回动作名、描述、参考帧索引
+- 更精准的 Prompt 工程
+"""
 
 from __future__ import annotations
 
@@ -76,6 +83,70 @@ class VLMService:
 
         return await self._chat(prompt, images_b64)
 
+    async def analyze_segment(
+        self,
+        frames: list[np.ndarray],
+        segment_id: int,
+        start_sec: float,
+        end_sec: float,
+        process_name: str,
+        overview: str,
+        detected_objects: list[str],
+        previous_actions: list[str],
+    ) -> dict:
+        """分析单个时序动作段，识别该段内的具体操作动作。
+
+        这是对标 ActionInsight 的核心改进：逐段分析而非全局采样。
+        """
+        images_b64 = [self._encode_frame(f) for f in frames]
+
+        context_parts = [
+            f"工序：「{process_name}」",
+            f"概览：{overview}",
+            f"当前段时间：{start_sec:.1f}s ~ {end_sec:.1f}s（时长 {end_sec - start_sec:.1f}s）",
+        ]
+
+        if detected_objects:
+            context_parts.append(f"本段检测到的物体：{', '.join(detected_objects)}")
+
+        if previous_actions:
+            prev_text = "\n".join(f"  - {a}" for a in previous_actions[-5:])
+            context_parts.append(f"前序已完成动作：\n{prev_text}")
+
+        context = "\n".join(context_parts)
+
+        prompt = (
+            f"{context}\n\n"
+            f"以上是第 {segment_id + 1} 段操作的 {len(frames)} 张连续截图。\n"
+            "请判断这几张图中操作员正在执行什么动作。\n\n"
+            "要求：\n"
+            "1. 简短描述这个动作（一句话）\n"
+            "2. 这个动作与前序动作是否相同（如果相同请标注）\n"
+            "3. 用以下 JSON 格式回答：\n"
+            '{"action": "动作名称", "description": "详细描述", '
+            '"is_same_as_previous": false, "confidence": 0.9}\n\n'
+            "仅返回 JSON，不要写其他内容。"
+        )
+
+        try:
+            raw = await self._chat(prompt, images_b64)
+            result = self._parse_segment_result(raw)
+            result["segment_id"] = segment_id
+            result["start_sec"] = start_sec
+            result["end_sec"] = end_sec
+            return result
+        except Exception as e:
+            logger.warning("段 {} 分析失败: {}", segment_id, e)
+            return {
+                "segment_id": segment_id,
+                "start_sec": start_sec,
+                "end_sec": end_sec,
+                "action": f"操作段{segment_id + 1}",
+                "description": "AI 未能识别，请手动标注",
+                "is_same_as_previous": False,
+                "confidence": 0.0,
+            }
+
     async def analyze_steps(
         self,
         frames: list[np.ndarray],
@@ -85,10 +156,11 @@ class VLMService:
         overview: str,
         on_batch_progress: Callable[[int, int], Awaitable[None]] | None = None,
     ) -> list[dict]:
-        """两阶段步骤识别：先用全局视角获取步骤列表，再逐批补充细节。"""
+        """两阶段步骤识别：先用全局视角获取步骤列表，再逐批补充细节。
 
-        # --- 阶段 A：全局步骤识别 ---
-        # 均匀采样最多 8 帧，确保覆盖视频全程
+        保留原有接口兼容性，供非分段模式使用。
+        """
+
         n_samples = min(8, len(frames))
         if n_samples <= 1:
             sample_indices = [0]
@@ -151,6 +223,116 @@ class VLMService:
         logger.info("VLM 步骤识别完成: {} 个步骤", len(global_steps))
         return self._deduplicate_steps(global_steps)
 
+    async def assemble_steps_from_segments(
+        self,
+        segment_results: list[dict],
+        process_name: str,
+        overview: str,
+    ) -> list[dict]:
+        """从分段分析结果组装最终 SOP 步骤列表。
+
+        1. 合并连续的相同动作
+        2. 为每个步骤分配时间范围
+        3. VLM 生成 OK/NG 判定标准
+        """
+        merged = self._merge_segment_results(segment_results)
+
+        if not merged:
+            return []
+
+        steps_desc = "\n".join(
+            f"{i+1}. {s['action']} ({s['start_sec']:.1f}s~{s['end_sec']:.1f}s) - {s['description']}"
+            for i, s in enumerate(merged)
+        )
+
+        prompt = (
+            f"工序「{process_name}」的 SOP 步骤如下（已从操作视频自动识别）：\n"
+            f"{steps_desc}\n\n"
+            f"操作概览：{overview}\n\n"
+            "请为每个步骤生成完整的 SOP 定义，JSON 数组格式：\n"
+            "[\n"
+            '  {"index": 0, "name": "步骤名", "description": "描述", '
+            '"action_type": "动作类型(assemble/inspect/pick/place/screw/other)", '
+            '"required_objects": ["需要的物体"], '
+            '"timeout_seconds": 30, "is_optional": false, '
+            '"ok_criteria": "合格判定标准", "ng_criteria": "不合格判定标准", '
+            '"start_sec": 0.0, "end_sec": 10.0}\n'
+            "]\n\n"
+            "重要：\n"
+            "- 保留所有步骤，不要合并或删减\n"
+            "- ok_criteria 描述应具体可观测（如「螺丝完全拧入，与表面齐平」）\n"
+            "- ng_criteria 描述应具体可判断（如「螺丝凸出、歪斜或未完全拧紧」）\n"
+            "- timeout_seconds 根据动作复杂度合理设定\n"
+            "- 保留原始时间范围 start_sec / end_sec\n\n"
+            "仅返回 JSON 数组。"
+        )
+
+        try:
+            raw = await self._chat(prompt, [])
+            steps = self._parse_steps_json(raw)
+            if steps:
+                for i, step in enumerate(steps):
+                    step["index"] = i
+                    step.setdefault("timeout_seconds", 30)
+                    step.setdefault("is_optional", False)
+                    step.setdefault("ok_criteria", "")
+                    step.setdefault("ng_criteria", "")
+                    step.setdefault("reference_frame_url", "")
+                    if "start_sec" not in step and i < len(merged):
+                        step["start_sec"] = merged[i]["start_sec"]
+                        step["end_sec"] = merged[i]["end_sec"]
+                        step["segment_ids"] = merged[i].get("segment_ids", [])
+                return steps
+        except Exception as e:
+            logger.warning("步骤组装 VLM 调用失败: {}", e)
+
+        return self._build_steps_from_merged(merged)
+
+    @staticmethod
+    def _merge_segment_results(segment_results: list[dict]) -> list[dict]:
+        """合并连续相同动作的段，保留时间范围。"""
+        if not segment_results:
+            return []
+
+        merged: list[dict] = []
+        for seg in segment_results:
+            if seg.get("is_same_as_previous") and merged:
+                merged[-1]["end_sec"] = seg["end_sec"]
+                merged[-1]["segment_ids"].append(seg["segment_id"])
+            else:
+                merged.append({
+                    "action": seg.get("action", "未知操作"),
+                    "description": seg.get("description", ""),
+                    "start_sec": seg.get("start_sec", 0),
+                    "end_sec": seg.get("end_sec", 0),
+                    "confidence": seg.get("confidence", 0),
+                    "segment_ids": [seg.get("segment_id", 0)],
+                })
+
+        return merged
+
+    @staticmethod
+    def _build_steps_from_merged(merged: list[dict]) -> list[dict]:
+        """从合并结果直接构建步骤（VLM 精炼失败时的回退）。"""
+        steps = []
+        for i, m in enumerate(merged):
+            steps.append({
+                "index": i,
+                "name": m["action"],
+                "description": m["description"],
+                "action_type": "other",
+                "required_objects": [],
+                "timeout_seconds": max(15, int((m["end_sec"] - m["start_sec"]) * 1.5)),
+                "is_optional": False,
+                "ok_criteria": "",
+                "ng_criteria": "",
+                "reference_frame_url": "",
+                "start_sec": m["start_sec"],
+                "end_sec": m["end_sec"],
+                "segment_ids": m.get("segment_ids", []),
+            })
+        return steps
+
     async def _fallback_json_steps(
         self,
         images_b64: list[str],
@@ -158,7 +340,6 @@ class VLMService:
         overview: str,
         all_objects: set[str],
     ) -> list[dict]:
-        """JSON 格式的备用步骤提取。"""
         prompt = (
             f"工序「{process_name}」视频分析。\n"
             f"概览：{overview}\n"
@@ -176,47 +357,6 @@ class VLMService:
         except Exception as e:
             logger.warning("VLM JSON 备用模式也失败: {}", e)
             return []
-
-    @staticmethod
-    def _parse_text_steps(raw: str, all_objects: set[str] | None = None) -> list[dict]:
-        """解析自然语言步骤列表（兼容 '1. 步骤名 - 描述' 格式）。"""
-        import re
-        steps = []
-        for line in raw.strip().split("\n"):
-            line = line.strip()
-            if not line:
-                continue
-            m = re.match(r"^(\d+)[.、)\]]\s*(.+)", line)
-            if not m:
-                continue
-            text = m.group(2).strip()
-            if " - " in text:
-                name, desc = text.split(" - ", 1)
-            elif "：" in text:
-                name, desc = text.split("：", 1)
-            elif ":" in text:
-                name, desc = text.split(":", 1)
-            else:
-                name, desc = text, ""
-
-            name = name.strip()
-            desc = desc.strip()
-            if not name:
-                continue
-
-            required_objects = []
-            if all_objects:
-                for obj in all_objects:
-                    if obj.lower() in (name + desc).lower():
-                        required_objects.append(obj)
-
-            steps.append({
-                "name": name,
-                "description": desc,
-                "action_type": "other",
-                "required_objects": required_objects,
-            })
-        return steps
 
     async def refine_steps(
         self,
@@ -312,6 +452,83 @@ class VLMService:
             frame = cv2.resize(frame, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_AREA)
         _, buffer = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 75])
         return base64.b64encode(buffer).decode("utf-8")
+
+    @staticmethod
+    def _parse_segment_result(raw: str) -> dict:
+        """解析单段分析的 JSON 返回。"""
+        content = raw.strip()
+        if "```" in content:
+            parts = content.split("```")
+            for part in parts[1:]:
+                lines = part.strip().split("\n", 1)
+                if len(lines) == 2:
+                    content = lines[1].rsplit("```", 1)[0]
+                    break
+
+        content = content.strip()
+        if not content.startswith("{"):
+            start = content.find("{")
+            if start != -1:
+                end = content.rfind("}") + 1
+                content = content[start:end]
+
+        try:
+            result = json.loads(content)
+            if isinstance(result, dict):
+                result.setdefault("action", "未知操作")
+                result.setdefault("description", "")
+                result.setdefault("is_same_as_previous", False)
+                result.setdefault("confidence", 0.5)
+                return result
+        except json.JSONDecodeError:
+            pass
+
+        return {
+            "action": raw.strip()[:50] if raw.strip() else "未知操作",
+            "description": raw.strip(),
+            "is_same_as_previous": False,
+            "confidence": 0.3,
+        }
+
+    @staticmethod
+    def _parse_text_steps(raw: str, all_objects: set[str] | None = None) -> list[dict]:
+        import re
+        steps = []
+        for line in raw.strip().split("\n"):
+            line = line.strip()
+            if not line:
+                continue
+            m = re.match(r"^(\d+)[.、)\]]\s*(.+)", line)
+            if not m:
+                continue
+            text = m.group(2).strip()
+            if " - " in text:
+                name, desc = text.split(" - ", 1)
+            elif "：" in text:
+                name, desc = text.split("：", 1)
+            elif ":" in text:
+                name, desc = text.split(":", 1)
+            else:
+                name, desc = text, ""
+
+            name = name.strip()
+            desc = desc.strip()
+            if not name:
+                continue
+
+            required_objects = []
+            if all_objects:
+                for obj in all_objects:
+                    if obj.lower() in (name + desc).lower():
+                        required_objects.append(obj)
+
+            steps.append({
+                "name": name,
+                "description": desc,
+                "action_type": "other",
+                "required_objects": required_objects,
+            })
+        return steps
 
     @staticmethod
     def _parse_steps_json(raw: str) -> list[dict]:

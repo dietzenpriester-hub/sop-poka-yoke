@@ -46,7 +46,9 @@ _STEP_KW_FIELDS = {f.name for f in fields(StepDefinition)} - {"index"}
 class SOPStateMachine:
     MIN_CONFIDENCE = 0.75
 
-    def __init__(self, sop_template: dict, debounce_seconds: float = 0.5, ng_tolerance: int = 3, global_detect: bool = False) -> None:
+    def __init__(self, sop_template: dict, debounce_seconds: float = 0.5,
+                 ng_tolerance: int = 3, global_detect: bool = False,
+                 min_consecutive_pass: int = 3) -> None:
         self.template_name = sop_template["name"]
         self.steps = []
         for i, raw in enumerate(sop_template["steps"]):
@@ -57,6 +59,7 @@ class SOPStateMachine:
         self.debounce_seconds = debounce_seconds
         self.ng_tolerance = ng_tolerance
         self.global_detect = global_detect
+        self.min_consecutive_pass = max(min_consecutive_pass, 1)
         self.status = SOPStatus.IDLE
         self.current_step_index = 0
         self.completed_indices: set[int] = set()
@@ -67,6 +70,21 @@ class SOPStateMachine:
         self._pending_match: dict | None = None
         self._pending_since: float = 0.0
         self._consecutive_ng: int = 0
+        self._consecutive_ok: int = 0
+
+    def load_template(self, sop_template: dict) -> None:
+        """动态加载新的 SOP 模板（仅在 IDLE 状态允许）。"""
+        if self.status != SOPStatus.IDLE:
+            logger.warning("状态机非 IDLE（当前={}），拒绝重载模板", self.status.value)
+            return
+        self.template_name = sop_template["name"]
+        self.steps = []
+        for i, raw in enumerate(sop_template["steps"]):
+            step = raw if isinstance(raw, dict) else {}
+            filtered = {k: v for k, v in step.items() if k in _STEP_KW_FIELDS}
+            filtered.setdefault("name", f"步骤{i + 1}")
+            self.steps.append(StepDefinition(index=i, **filtered))
+        logger.info("已重载 SOP 模板: {} ({} 步)", self.template_name, len(self.steps))
 
     def start(self, work_order_sn: str) -> None:
         self.work_order_sn = work_order_sn
@@ -79,7 +97,9 @@ class SOPStateMachine:
         self._pending_match = None
         self._pending_since = 0.0
         self._consecutive_ng = 0
-        logger.info("工单开始: SN={}, SOP={}, 全局检测={}", work_order_sn, self.template_name, self.global_detect)
+        self._consecutive_ok = 0
+        logger.info("工单开始: SN={}, SOP={}, 全局检测={}, 连续通过要求={}",
+                    work_order_sn, self.template_name, self.global_detect, self.min_consecutive_pass)
 
     def get_current_step(self) -> StepDefinition | None:
         if self.current_step_index < len(self.steps):
@@ -108,25 +128,20 @@ class SOPStateMachine:
 
         if matches and confidence >= self.MIN_CONFIDENCE:
             self._consecutive_ng = 0
-            now = time.time()
-            if self._pending_match is None:
-                self._pending_match = action_result
-                self._pending_since = now
-                return {"event": "debounce", "message": f"动作匹配中，等待防抖确认（{self.debounce_seconds}s）"}
-            if now - self._pending_since < self.debounce_seconds:
-                return {"event": "debounce", "message": f"防抖中… {now - self._pending_since:.1f}/{self.debounce_seconds}s"}
-            self._pending_match = None
-        else:
-            self._pending_match = None
+            self._consecutive_ok += 1
+            logger.info("动作匹配 ({}/{}): 步骤 [{}], conf={:.2f}",
+                        self._consecutive_ok, self.min_consecutive_pass, current_step.name, confidence)
 
-        if matches and confidence >= self.MIN_CONFIDENCE:
+            if self._consecutive_ok < self.min_consecutive_pass:
+                return {"event": "matching", "message": f"动作匹配中 ({self._consecutive_ok}/{self.min_consecutive_pass})", "confidence": confidence}
+
+            self._consecutive_ok = 0
             self.results.append(StepResult(
                 step_index=self.current_step_index, step_name=current_step.name,
                 result="OK", confidence=confidence, timestamp=time.time(),
             ))
             self.current_step_index += 1
             self._step_start_time = time.time()
-            self._consecutive_ng = 0
             if self.current_step_index >= len(self.steps):
                 self.status = SOPStatus.COMPLETE
                 logger.info("工单完成: SN={}", self.work_order_sn)
@@ -134,6 +149,9 @@ class SOPStateMachine:
             self.status = SOPStatus.STEP_OK
             return {"event": "step_ok", "message": f"步骤 {current_step.name} 完成", "next_step": self.steps[self.current_step_index].name}
         else:
+            if self._consecutive_ok > 0:
+                logger.info("匹配中断 (连续OK {} → 0)，重新计数", self._consecutive_ok)
+            self._consecutive_ok = 0
             self._consecutive_ng += 1
             if self._consecutive_ng < self.ng_tolerance:
                 logger.info("动作不匹配 ({}/{}): 期望 [{}]，继续观察",
@@ -227,3 +245,4 @@ class SOPStateMachine:
         self._pending_match = None
         self._pending_since = 0.0
         self._consecutive_ng = 0
+        self._consecutive_ok = 0
