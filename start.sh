@@ -62,8 +62,12 @@ echo ""
 
 # 1. Ollama
 echo -e "${YELLOW}[1/4] 检查 Ollama...${NC}"
+export OLLAMA_FLASH_ATTENTION="${OLLAMA_FLASH_ATTENTION:-1}"
+export OLLAMA_KV_CACHE_TYPE="${OLLAMA_KV_CACHE_TYPE:-q8_0}"
+echo -e "  KV Cache 量化: ${GREEN}${OLLAMA_KV_CACHE_TYPE}${NC} (Flash Attention: ${OLLAMA_FLASH_ATTENTION})"
 if pgrep -x ollama >/dev/null 2>&1; then
     echo -e "  ${GREEN}✓${NC} Ollama 已在运行"
+    echo -e "  ${YELLOW}!${NC} 若需应用 KV Cache 配置，请先停止再重启 Ollama"
 else
     echo -e "  启动 Ollama..."
     ollama serve >"$LOG_DIR/ollama.log" 2>&1 &
@@ -71,7 +75,7 @@ else
     echo -e "  ${GREEN}✓${NC} Ollama 已启动"
 fi
 
-VLM_MODEL="${SOP_VLM_MODEL:-qwen2.5vl:7b}"
+VLM_MODEL="${SOP_VLM_MODEL:-qwen3-vl:8b-instruct}"
 if curl -s http://localhost:11434/api/tags | grep -q "${VLM_MODEL%%:*}"; then
     echo -e "  ${GREEN}✓${NC} ${VLM_MODEL} 模型已就绪"
 else

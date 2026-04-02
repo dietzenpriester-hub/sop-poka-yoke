@@ -1,4 +1,4 @@
-"""VLM 视觉语言分析服务 — 通过 Ollama API 调用 Qwen2.5-VL"""
+"""VLM 视觉语言分析服务 — 通过 Ollama API 调用 Qwen VL 系列模型"""
 
 from __future__ import annotations
 
@@ -19,14 +19,16 @@ class VLMService:
     def __init__(
         self,
         ollama_url: str = "http://localhost:11434",
-        model: str = "qwen2.5vl:3b",
+        model: str = "qwen3-vl:8b-instruct",
         timeout: float = 300.0,
         max_retries: int = 3,
+        num_ctx: int = 4096,
     ):
         self.ollama_url = ollama_url.rstrip("/")
         self.model = model
         self.timeout = timeout
         self.max_retries = max_retries
+        self.num_ctx = num_ctx
         self._client: httpx.AsyncClient | None = None
 
     async def _get_client(self) -> httpx.AsyncClient:
@@ -269,7 +271,7 @@ class VLMService:
             "model": self.model,
             "messages": [message],
             "stream": False,
-            "options": {"temperature": 0.1, "num_predict": 2000},
+            "options": {"temperature": 0.1, "num_predict": 2000, "num_ctx": self.num_ctx},
         }
 
         client = await self._get_client()

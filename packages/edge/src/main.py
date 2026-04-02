@@ -113,7 +113,8 @@ def _try_init_vlm():
         from src.inference.vlm_recognizer import VLMClient
         vlm = VLMClient(
             base_url=os.environ.get("SOP_OLLAMA_URL", "http://localhost:11434"),
-            model=os.environ.get("SOP_VLM_MODEL", "qwen2.5vl:3b"),
+            model=os.environ.get("SOP_VLM_MODEL", "qwen3-vl:8b-instruct"),
+            num_ctx=int(os.environ.get("SOP_VLM_NUM_CTX", "2048")),
         )
         warmup_frame = np.zeros((100, 100, 3), dtype=np.uint8)
         result = vlm.classify_action([warmup_frame], {"steps": [{"name": "warmup"}], "current_step_index": 0})
@@ -285,9 +286,12 @@ def main() -> None:
         on_clip_saved=lambda p: sync.enqueue(Priority.P3, {"type": "video", "local_path": p}),
     )
 
+    global_detect = os.environ.get("SOP_GLOBAL_DETECT", "0") == "1"
     fsm = SOPStateMachine(
         _load_sop_template(),
         debounce_seconds=float(os.environ.get("SOP_DEBOUNCE_SEC", "0.5")),
+        ng_tolerance=int(os.environ.get("SOP_NG_TOLERANCE", "3")),
+        global_detect=global_detect,
     )
 
     # 后台轮询：IDLE 时每 5 秒查询服务端是否有待处理工单
@@ -352,7 +356,14 @@ def main() -> None:
         logger.info("已订阅命令主题: {}", cmd_topic)
 
     stream.start()
-    logger.info("边缘端就绪，等待工单启动指令（MQTT command: start_workorder）")
+
+    auto_start = os.environ.get("SOP_AUTO_START", "0") == "1"
+    if auto_start:
+        auto_sn = os.environ.get("SOP_AUTO_START_SN", f"AUTO-{time.strftime('%Y%m%d-%H%M%S')}")
+        fsm.start(auto_sn)
+        logger.info("自动启动工单: {} (SOP_AUTO_START=1)", auto_sn)
+    else:
+        logger.info("边缘端就绪，等待工单启动指令（MQTT command: start_workorder）")
 
     vlm_min_interval = float(os.environ.get("SOP_VLM_INTERVAL", "3.0"))
     mqtt_min_interval = float(os.environ.get("SOP_MQTT_INTERVAL", "1.0"))
@@ -386,6 +397,10 @@ def main() -> None:
                     "message": f"步骤超时: {timeout_evt}",
                     "step_index": fsm.current_step_index,
                 })
+                if os.environ.get("SOP_AUTO_START") == "1":
+                    fsm.status = SOPStatus.RUNNING
+                    fsm._step_start_time = time.time()
+                    logger.info("自动恢复: TIMEOUT → RUNNING（测试模式）")
 
             item = stream.get_frame()
             if item is None:
@@ -422,27 +437,27 @@ def main() -> None:
                 d.get("class_name", d.get("label", "")) for d in det_dicts
             ] if det_dicts else []
 
-            # VLM 异步推理：节流控制，避免每帧都提交
             vlm_action_text = ""
             vlm_confidence = 0.0
             vlm_matches = False
             if vlm_worker:
                 now_vlm = time.monotonic()
                 if now_vlm - last_vlm_submit_time >= vlm_min_interval:
-                    vlm_worker.submit(
-                        [frame],
-                        {
-                            "steps": [
-                                {"name": s.name, "description": s.description,
-                                 "required_objects": s.required_objects,
-                                 "action_type": s.action_type,
-                                 "timeout_seconds": s.timeout_seconds,
-                                 "is_optional": s.is_optional}
-                                for s in fsm.steps
-                            ],
-                            "current_step_index": fsm.current_step_index,
-                        },
-                    )
+                    sop_ctx = {
+                        "steps": [
+                            {"name": s.name, "description": s.description,
+                             "required_objects": s.required_objects,
+                             "action_type": s.action_type,
+                             "timeout_seconds": s.timeout_seconds,
+                             "is_optional": s.is_optional}
+                            for s in fsm.steps
+                        ],
+                        "current_step_index": fsm.current_step_index,
+                    }
+                    if fsm.global_detect:
+                        sop_ctx["global_detect"] = True
+                        sop_ctx["completed_indices"] = list(fsm.completed_indices)
+                    vlm_worker.submit([frame], sop_ctx)
                     last_vlm_submit_time = now_vlm
                 action = vlm_worker.poll_result()
                 if action is not None:
@@ -451,7 +466,10 @@ def main() -> None:
                     vlm_matches = bool(action.get("matches_expected", False))
                     logger.info("VLM 动作识别: {} (conf={:.2f})",
                                 vlm_action_text, vlm_confidence)
-                    result = fsm.process_action(action)
+                    if fsm.global_detect:
+                        result = fsm.process_global_action(action)
+                    else:
+                        result = fsm.process_action(action)
                 else:
                     result = {"event": "vlm_pending"}
             else:
@@ -472,7 +490,7 @@ def main() -> None:
                     "snapshot": snapshot_b64,
                 })
                 cur_step = fsm.get_current_step()
-                send_status({
+                status_msg = {
                     "type": "sop_status",
                     "station_id": station_id,
                     "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
@@ -489,11 +507,20 @@ def main() -> None:
                     "vlm_matches": vlm_matches,
                     "yolo_objects": list(set(det_classes)),
                     "snapshot": snapshot_b64,
-                })
+                }
+                if fsm.global_detect:
+                    status_msg["completed_indices"] = sorted(fsm.completed_indices)
+                    status_msg["completed_count"] = len(fsm.completed_indices)
+                send_status(status_msg)
                 last_mqtt_send_time = now_mqtt
 
             if result.get("type") == "blocked":
-                logger.debug("状态机已阻塞: {}", result.get("reason", ""))
+                if os.environ.get("SOP_AUTO_START") == "1" and fsm.status in (SOPStatus.STEP_NG, SOPStatus.TIMEOUT):
+                    fsm.status = SOPStatus.RUNNING
+                    fsm._step_start_time = time.time()
+                    logger.info("自动重试: {} → RUNNING（测试模式）", fsm.status.value)
+                else:
+                    logger.debug("状态机已阻塞: {}", result.get("reason", ""))
                 recorder.feed(frame, ts)
                 continue
 
@@ -556,7 +583,12 @@ def main() -> None:
                 alerter.alert_ok()
                 logger.info("所有 SOP 步骤完成！")
                 fsm.reset()
-                logger.info("状态机已重置为 IDLE，等待下一个工单")
+                if os.environ.get("SOP_AUTO_START") == "1":
+                    new_sn = f"AUTO-{time.strftime('%Y%m%d-%H%M%S')}"
+                    fsm.start(new_sn)
+                    logger.info("自动开始新工单: {} (SOP_AUTO_START=1)", new_sn)
+                else:
+                    logger.info("状态机已重置为 IDLE，等待下一个工单")
 
             recorder.feed(frame, ts)
 

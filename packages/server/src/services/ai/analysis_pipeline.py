@@ -44,6 +44,7 @@ class AnalysisPipeline:
             ollama_url=settings.OLLAMA_URL,
             model=settings.VLM_MODEL,
             timeout=settings.VLM_TIMEOUT,
+            num_ctx=settings.VLM_NUM_CTX,
         )
 
     async def run(

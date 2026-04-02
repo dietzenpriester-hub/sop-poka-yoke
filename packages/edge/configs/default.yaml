@@ -14,8 +14,9 @@ yolo:
 
 vlm:
   ollama_url: "http://localhost:11434"
-  model: "qwen2.5-vl:7b"
+  model: "qwen3-vl:8b-instruct"
   timeout: 10.0
+  num_ctx: 2048
 
 engine:
   step_timeout_seconds: 60.0

@@ -53,7 +53,11 @@ async def _handle_alert(station_id: str, payload: dict) -> None:
             else:
                 st_r = await session.execute(
                     select(Station).where(
-                        or_(Station.edge_device_id == station_id, Station.name == station_id),
+                        or_(
+                            Station.edge_device_id == station_id,
+                            Station.name == station_id,
+                            Station.edge_device_id == f"edge-{station_id}",
+                        ),
                     ).limit(1),
                 )
                 station_row = st_r.scalar_one_or_none()
@@ -109,7 +113,11 @@ async def _validate_station(station_id: str) -> bool:
         async with async_session_factory() as session:
             st_r = await session.execute(
                 select(Station.id).where(
-                    or_(Station.edge_device_id == station_id, Station.name == station_id),
+                    or_(
+                        Station.edge_device_id == station_id,
+                        Station.name == station_id,
+                        Station.edge_device_id == f"edge-{station_id}",
+                    ),
                 ).limit(1),
             )
             row = st_r.scalar_one_or_none()
@@ -119,7 +127,36 @@ async def _validate_station(station_id: str) -> bool:
             return row is not None
     except Exception as e:
         logger.warning("校验 station_id 异常: {} — {}", station_id, e)
-        return True  # 数据库异常时放行，避免阻断正常消息
+        return True
+
+
+async def _resolve_ws_station_ids(station_id: str) -> list[str]:
+    """解析 MQTT station_id 对应的所有可能 WebSocket 标识（edge_device_id、name 等）。"""
+    candidates = {station_id}
+    from sqlalchemy import or_, select
+    from src.core.database import async_session_factory
+    from src.models.station import Station
+    try:
+        async with async_session_factory() as session:
+            st_r = await session.execute(
+                select(Station).where(
+                    or_(
+                        Station.edge_device_id == station_id,
+                        Station.name == station_id,
+                        Station.edge_device_id == f"edge-{station_id}",
+                    ),
+                ).limit(1),
+            )
+            row = st_r.scalar_one_or_none()
+            if row:
+                if row.edge_device_id:
+                    candidates.add(row.edge_device_id)
+                if row.name:
+                    candidates.add(row.name)
+                candidates.add(str(row.id))
+    except Exception as e:
+        logger.debug("解析工位标识异常: {} — {}", station_id, e)
+    return list(candidates)
 
 
 async def _dispatch_message(station_id: str, event_kind: str, payload: dict) -> None:
@@ -134,7 +171,11 @@ async def _dispatch_message(station_id: str, event_kind: str, payload: dict) -> 
             return
         await _handle_alert(station_id, payload)
     else:
-        await broadcast_to_station(station_id, {"topic": f"{settings.MQTT_TOPIC_PREFIX}/{station_id}/{event_kind}", "payload": payload})
+        ws_ids = await _resolve_ws_station_ids(station_id)
+        logger.debug("MQTT→WS 转发: station_id={} event={} ws_ids={}", station_id, event_kind, ws_ids)
+        msg = {"topic": f"{settings.MQTT_TOPIC_PREFIX}/{station_id}/{event_kind}", "payload": payload}
+        for ws_id in ws_ids:
+            await broadcast_to_station(ws_id, msg)
 
 
 def _run_mqtt_loop(loop: asyncio.AbstractEventLoop) -> None:

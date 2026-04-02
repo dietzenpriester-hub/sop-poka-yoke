@@ -25,12 +25,14 @@ class VLMClient:
     def __init__(
         self,
         base_url: str = "http://localhost:11434",
-        model: str = "qwen2.5vl:3b",
+        model: str = "qwen3-vl:8b-instruct",
         timeout: float = 60.0,
+        num_ctx: int = 2048,
     ) -> None:
         self.base_url = base_url
         self.model = model
         self.timeout = timeout
+        self.num_ctx = num_ctx
         self.client = httpx.Client(timeout=timeout)
 
     def close(self) -> None:
@@ -49,7 +51,7 @@ class VLMClient:
             "model": self.model,
             "messages": [{"role": "user", "content": prompt, "images": images_b64}],
             "stream": False,
-            "options": {"temperature": 0.1, "num_predict": 200},
+            "options": {"temperature": 0.1, "num_predict": 200, "num_ctx": self.num_ctx},
             "keep_alive": "30m",
         }
         try:
@@ -89,6 +91,8 @@ class VLMClient:
         return base64.b64encode(buffer).decode("utf-8")
 
     def _build_prompt(self, ctx: dict) -> str:
+        if ctx.get("global_detect"):
+            return self._build_global_prompt(ctx)
         current = ctx.get("current_step_index", 0)
         steps = ctx.get("steps", [])
         expected = steps[current].get("name", "未知") if current < len(steps) else "未知"
@@ -101,6 +105,25 @@ class VLMClient:
             "Be strict: only return matches_expected=true if you clearly see the action being done.\n"
             "Return only valid JSON with these exact keys:\n"
             '{"action": "<describe what you actually see>", "matches_expected": <true or false>, "confidence": <0.0 to 1.0>}'
+        )
+
+    def _build_global_prompt(self, ctx: dict) -> str:
+        steps = ctx.get("steps", [])
+        completed = set(ctx.get("completed_indices", []))
+        remaining = []
+        for i, s in enumerate(steps):
+            if i not in completed:
+                name = s.get("name", f"步骤{i + 1}")
+                desc = s.get("description", "")
+                remaining.append(f"  {i}: {name}" + (f" ({desc})" if desc else ""))
+        steps_text = "\n".join(remaining) if remaining else "  (所有步骤已完成)"
+        return (
+            "你是 SOP 动作验证专家。以下是尚未完成的 SOP 步骤：\n"
+            f"{steps_text}\n\n"
+            "仔细观察图片，操作员正在执行哪个步骤？\n"
+            "如果操作员正在执行其中某个步骤，返回该步骤编号；否则返回 -1。\n"
+            "只返回 JSON，格式如下：\n"
+            '{"action": "<描述你看到的动作>", "matched_step": <步骤编号或-1>, "confidence": <0.0到1.0>}'
         )
 
     def _parse_response(self, content: str) -> dict:
@@ -131,11 +154,22 @@ class VLMClient:
     def _validate_action_result(cls, data: dict) -> dict:
         action = str(data.get("action", "unknown")).strip()
         confidence = min(1.0, max(0.0, float(data.get("confidence", 0.0))))
+        if action in cls._INVALID_ACTIONS:
+            confidence = 0.0
+
+        if "matched_step" in data:
+            matched_step = int(data.get("matched_step", -1))
+            return {
+                "action": action,
+                "confidence": confidence,
+                "matched_step": matched_step,
+                "matches_expected": matched_step >= 0,
+                "details": str(data.get("details", "")),
+            }
+
         matches = bool(data.get("matches_expected", False))
-        # 模型抄了示例占位文字，说明没有真正分析图像
         if action in cls._INVALID_ACTIONS:
             matches = False
-            confidence = 0.0
         return {
             "action": action,
             "confidence": confidence,
