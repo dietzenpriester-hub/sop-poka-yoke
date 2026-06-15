@@ -8,8 +8,6 @@ from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from minio import Minio
 from sqlalchemy.ext.asyncio import AsyncSession
 
-MAX_UPLOAD_BYTES = 100 * 1024 * 1024
-
 from src.core.config import settings
 from src.core.database import get_db
 from src.core.security import get_current_user
@@ -20,6 +18,8 @@ from src.schemas.learning import (
     TaskCreateResponse,
 )
 from src.services.learning_service import LearningService
+
+MAX_UPLOAD_BYTES = 100 * 1024 * 1024
 
 router = APIRouter()
 _service = LearningService()

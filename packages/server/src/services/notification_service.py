@@ -80,7 +80,7 @@ def _build_card(
         "card": {
             "config": {"wide_screen_mode": True},
             "header": {
-                "title": {"tag": "plain_text", "content": f"⚠️ SOP 防呆系统告警"},
+                "title": {"tag": "plain_text", "content": "⚠️ SOP 防呆系统告警"},
                 "template": color,
             },
             "elements": [

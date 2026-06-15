@@ -12,6 +12,7 @@ from starlette.responses import JSONResponse
 from src.api.router import api_router
 from src.core.config import settings
 from src.core.database import engine, init_db
+from src.middleware.audit import AuditMiddleware
 from src.tasks.mqtt_consumer import start_mqtt_consumer_in_thread, stop_mqtt_consumer
 
 
@@ -47,7 +48,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-from src.middleware.audit import AuditMiddleware
 app.add_middleware(AuditMiddleware)
 
 app.include_router(api_router, prefix="/api")

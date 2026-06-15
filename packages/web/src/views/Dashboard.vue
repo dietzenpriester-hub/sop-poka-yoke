@@ -88,9 +88,6 @@ async function loadDashboard() {
     if (ovRes.status === "fulfilled") overview.value = ovRes.value.data;
     if (stRes.status === "fulfilled") {
       stationStatus.value = stRes.value.data;
-      if (!wsStationId.value && stRes.value.data.length > 0) {
-        wsStationId.value = String(stRes.value.data[0].id);
-      }
     }
     if (alRes.status === "fulfilled") recentAlerts.value = alRes.value.data;
     if (trRes.status === "fulfilled") applyTrendChart(trRes.value.data);

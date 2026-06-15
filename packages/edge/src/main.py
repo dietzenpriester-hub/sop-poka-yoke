@@ -289,10 +289,9 @@ def main() -> None:
                 conf = getattr(d, "confidence", 0)
             if len(bbox) < 4:
                 continue
-            x1, y1, w_or_x2, h_or_y2 = int(bbox[0]), int(bbox[1]), int(bbox[2]), int(bbox[3])
-            if w_or_x2 < x1:
+            x1, y1, x2, y2 = int(bbox[0]), int(bbox[1]), int(bbox[2]), int(bbox[3])
+            if x2 <= x1 or y2 <= y1:
                 continue
-            x2, y2 = x1 + w_or_x2, y1 + h_or_y2
             color = _DET_COLORS.get(label, _DET_COLORS["default"])
             cv2.rectangle(overlay, (x1, y1), (x2, y2), color, 2)
             text = f"{label} {conf:.0%}"

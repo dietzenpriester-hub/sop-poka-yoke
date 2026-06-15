@@ -1,9 +1,5 @@
 """YOLO 检测器单元测试（Mock）"""
 
-from unittest.mock import MagicMock, patch
-
-import numpy as np
-
 from src.inference.yolo_detector import ObjectTracker, Detection
 
 

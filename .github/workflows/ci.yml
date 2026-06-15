@@ -75,7 +75,7 @@ jobs:
 
       - name: 运行单元测试
         working-directory: packages/edge
-        run: pytest tests/ -v --tb=short || true
+        run: pytest tests/ -v --tb=short
 
   web-build:
     name: 前端构建

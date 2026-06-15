@@ -9,7 +9,7 @@ from openpyxl.utils import get_column_letter
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.models.workorder import WorkOrder, StepRecord
+from src.models.workorder import WorkOrder
 from src.models.alert import AlertEvent
 from src.models.material_check import MaterialCheck
 from src.models.completion_check import CompletionCheck
