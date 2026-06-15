@@ -278,10 +278,12 @@ class VLMService:
                     step.setdefault("ok_criteria", "")
                     step.setdefault("ng_criteria", "")
                     step.setdefault("reference_frame_url", "")
+                    if i < len(merged):
+                        step.setdefault("segment_ids", merged[i].get("segment_ids", []))
+                        step.setdefault("source_confidence", merged[i].get("confidence", 0.0))
                     if "start_sec" not in step and i < len(merged):
                         step["start_sec"] = merged[i]["start_sec"]
                         step["end_sec"] = merged[i]["end_sec"]
-                        step["segment_ids"] = merged[i].get("segment_ids", [])
                 return steps
         except Exception as e:
             logger.warning("步骤组装 VLM 调用失败: {}", e)

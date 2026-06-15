@@ -46,6 +46,7 @@ class ExtractionResult:
     fps: float = 0.0
     duration_sec: float = 0.0
     motion_profile: list[float] = field(default_factory=list)
+    segmentation_mode: str = "motion"
 
 
 class FrameExtractor:
@@ -68,6 +69,7 @@ class FrameExtractor:
         min_segment_sec: float = 1.5,
         pause_threshold_ratio: float = 0.3,
         frames_per_segment: int = 3,
+        coarse_fallback_min_duration_sec: float = 8.0,
     ):
         self.max_keyframes = max_keyframes
         self.scene_threshold = scene_threshold
@@ -77,6 +79,7 @@ class FrameExtractor:
         self.min_segment_sec = min_segment_sec
         self.pause_threshold_ratio = pause_threshold_ratio
         self.frames_per_segment = frames_per_segment
+        self.coarse_fallback_min_duration_sec = coarse_fallback_min_duration_sec
 
     def extract(self, video_path: str) -> ExtractionResult:
         cap = cv2.VideoCapture(video_path)
@@ -143,7 +146,17 @@ class FrameExtractor:
         )
 
         segments = self._build_segments(sampled_frames, boundaries, fps)
+        segmentation_mode = "motion"
+        if self._should_use_uniform_fallback(segments, duration_sec, len(sampled_frames)):
+            logger.warning(
+                "运动分割过粗: {}秒视频仅 {} 段，切换为均匀细分兜底",
+                round(duration_sec, 1),
+                len(segments),
+            )
+            segments = self._fallback_uniform_segments(sampled_frames)
+            segmentation_mode = "uniform_fallback"
         result.segments = segments
+        result.segmentation_mode = segmentation_mode
 
         all_keyframes: list[KeyFrame] = []
         for seg in segments:
@@ -157,6 +170,19 @@ class FrameExtractor:
             duration_sec,
         )
         return result
+
+    def _should_use_uniform_fallback(
+        self,
+        segments: list[ActionSegment],
+        duration_sec: float,
+        sampled_count: int,
+    ) -> bool:
+        """当运动谷值无法切开较长视频时，用均匀分段避免整段合成一个步骤。"""
+        return (
+            duration_sec >= self.coarse_fallback_min_duration_sec
+            and len(segments) <= 1
+            and sampled_count >= 6
+        )
 
     def _smooth_motion(self, motion: list[float]) -> list[float]:
         if len(motion) <= self.motion_smooth_window:

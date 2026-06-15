@@ -27,6 +27,11 @@ class StepDefinition:
     action_type: str = ""
     timeout_seconds: float = 120.0
     is_optional: bool = False
+    ok_criteria: str = ""
+    ng_criteria: str = ""
+    reference_frame_url: str = ""
+    reference_frame_b64: str = ""
+    reference_frame_timestamp: float = 0.0
 
 
 @dataclass

@@ -6,6 +6,7 @@ import uuid
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from minio import Minio
+from minio.error import S3Error
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.config import settings
@@ -20,6 +21,7 @@ from src.schemas.learning import (
 from src.services.learning_service import LearningService
 
 MAX_UPLOAD_BYTES = 100 * 1024 * 1024
+LEARNING_NAME_PATTERN = r"^[\w\-\u4e00-\u9fff]+(?: [\w\-\u4e00-\u9fff]+)*$"
 
 router = APIRouter()
 _service = LearningService()
@@ -27,8 +29,8 @@ _service = LearningService()
 
 @router.post("/upload-video", response_model=TaskCreateResponse)
 async def upload_standard_video(
-    product_model: str = Query(..., max_length=100, pattern=r"^[\w\-\u4e00-\u9fff]+$"),
-    process_name: str = Query(..., max_length=100, pattern=r"^[\w\-\u4e00-\u9fff]+$"),
+    product_model: str = Query(..., max_length=100, pattern=LEARNING_NAME_PATTERN),
+    process_name: str = Query(..., max_length=100, pattern=LEARNING_NAME_PATTERN),
     video: UploadFile = File(...),
     db: AsyncSession = Depends(get_db),
     _: dict = Depends(get_current_user),
@@ -43,8 +45,13 @@ async def upload_standard_video(
         secure=settings.MINIO_SECURE,
     )
     bucket = "sop-learning"
-    if not client.bucket_exists(bucket):
-        client.make_bucket(bucket)
+    try:
+        if not client.bucket_exists(bucket):
+            client.make_bucket(bucket)
+    except S3Error as e:
+        raise HTTPException(503, f"视频存储服务认证失败或不可用：{e.code}") from e
+    except Exception as e:
+        raise HTTPException(503, "视频存储服务不可用，请确认 MinIO 已启动且账号配置正确") from e
 
     object_name = f"{product_model}/{process_name}/{uuid.uuid4()}.mp4"
     with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as tmp:
@@ -62,7 +69,12 @@ async def upload_standard_video(
     try:
         length = os.path.getsize(tmp_path)
         with open(tmp_path, "rb") as f:
-            client.put_object(bucket, object_name, f, length, "video/mp4")
+            try:
+                client.put_object(bucket, object_name, f, length, "video/mp4")
+            except S3Error as e:
+                raise HTTPException(503, f"视频存储服务写入失败：{e.code}") from e
+            except Exception as e:
+                raise HTTPException(503, "视频写入存储失败，请检查 MinIO 服务状态") from e
     finally:
         os.unlink(tmp_path)
 
@@ -120,6 +132,19 @@ async def confirm_task(
     try:
         result = await _service.confirm_and_generate(task_id, db)
         return result
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+
+
+@router.post("/task/{task_id}/retry", response_model=LearningTaskResponse)
+async def retry_task_analysis(
+    task_id: str,
+    db: AsyncSession = Depends(get_db),
+    _: dict = Depends(get_current_user),
+):
+    try:
+        task = await _service.retry_analysis(task_id, db)
+        return LearningTaskResponse.model_validate(task)
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
 

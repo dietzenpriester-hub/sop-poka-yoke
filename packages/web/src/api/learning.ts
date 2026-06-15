@@ -52,5 +52,6 @@ export const learningApi = {
     api.put(`/learning/task/${taskId}/steps`, { steps }),
   confirmTask: (taskId: string) =>
     api.post<{ template_id: number; name: string; step_count: number }>(`/learning/task/${taskId}/confirm`),
+  retryTask: (taskId: string) => api.post<LearningTask>(`/learning/task/${taskId}/retry`),
   deleteTask: (taskId: string) => api.delete(`/learning/task/${taskId}`),
 };

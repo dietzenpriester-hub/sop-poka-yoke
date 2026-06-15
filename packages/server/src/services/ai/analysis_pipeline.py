@@ -111,6 +111,7 @@ class AnalysisPipeline:
             "duration_sec": round(extraction.duration_sec, 1),
             "segments_count": len(segments),
             "keyframes_count": len(extraction.keyframes),
+            "segmentation_mode": extraction.segmentation_mode,
         })
 
         # === Phase 2: YOLO Detection ===
@@ -220,6 +221,7 @@ class AnalysisPipeline:
             "phase": "分析完成",
             "step_count": len(steps),
             "segments_count": len(segments),
+            "segmentation_mode": extraction.segmentation_mode,
             "confidence": self._compute_overall_confidence(segment_results),
         })
 

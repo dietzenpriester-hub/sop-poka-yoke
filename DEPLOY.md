@@ -284,6 +284,15 @@ SOP_API_BASE=http://10.10.10.100:8000
 SOP_OLLAMA_URL=http://localhost:11434
 SOP_VLM_MODEL=qwen3-vl:8b-instruct
 SOP_YOLO_MODEL=yolo11n.pt
+# VLM 轻量门控：先用 ROI / 连续检测过滤，降低空闲画面和单帧噪声误判
+SOP_VLM_GATE_ENABLED=1
+# 归一化 ROI: x1,y1,x2,y2；示例表示画面中间 80% 区域
+SOP_OPERATION_ROI=0.1,0.1,0.9,0.9
+SOP_VLM_STABLE_FRAMES=2
+SOP_VLM_GATE_COOLDOWN=1.0
+SOP_VLM_MIN_DET_CONF=0.25
+# 留空表示任意 YOLO 类别；若现场人形稳定，可设为 person
+SOP_VLM_TARGET_OBJECTS=
 EOF
 ```
 

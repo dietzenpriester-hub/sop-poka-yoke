@@ -11,7 +11,11 @@ export function parseErrorMsg(e: unknown, fallback: string): string {
   if (Array.isArray(d) && d.length > 0) {
     const first = d[0];
     if (typeof first === "object" && first !== null && "msg" in first) {
-      return String((first as { msg: string }).msg);
+      const msg = String((first as { msg: string }).msg);
+      if (msg.includes("String should match pattern")) {
+        return "产品型号/工序名称仅支持中文、字母、数字、下划线、横杠，可使用单个空格分隔";
+      }
+      return msg;
     }
   }
   return fallback;

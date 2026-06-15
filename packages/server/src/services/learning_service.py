@@ -15,6 +15,10 @@ from src.models.sop import SOPTemplate
 from src.services.ai.analysis_pipeline import AnalysisPipeline
 
 
+QUALITY_MIN_CONFIDENCE = 0.65
+QUALITY_LONG_VIDEO_SEC = 10.0
+
+
 class LearningService:
     def __init__(self) -> None:
         self._pipeline: AnalysisPipeline | None = None
@@ -89,20 +93,48 @@ class LearningService:
             progress_cb=progress_callback,
         )
 
-        task.status = "completed"
         task.progress = 1.0
         task.steps = steps
         task.completed_at = datetime.now(timezone.utc)
-        task.analysis_detail = {
+        analysis_detail = {
             **(task.analysis_detail or {}),
             "phase": "分析完成",
         }
+        quality = self._evaluate_quality(steps, analysis_detail)
+        analysis_detail["quality"] = quality
+        task.analysis_detail = analysis_detail
+        task.status = "completed" if quality["passed"] else "needs_review"
         await db.commit()
-        logger.info("AI 分析完成: {} 共 {} 步", task_id, len(steps))
+        logger.info("AI 分析完成: {} 共 {} 步，质量状态={}", task_id, len(steps), quality["status"])
 
     async def get_task(self, task_id: str, db: AsyncSession) -> LearningTask | None:
         result = await db.execute(select(LearningTask).where(LearningTask.task_id == task_id))
         return result.scalar_one_or_none()
+
+    async def retry_analysis(self, task_id: str, db: AsyncSession) -> LearningTask:
+        result = await db.execute(select(LearningTask).where(LearningTask.task_id == task_id))
+        task = result.scalar_one_or_none()
+        if not task:
+            raise ValueError("任务不存在")
+        if task.status not in {"failed", "needs_review"}:
+            raise ValueError(f"任务状态 {task.status} 不支持重试分析")
+        if task.template_id is not None:
+            raise ValueError("任务已生成模板，无法重试分析")
+
+        task.status = "queued"
+        task.progress = 0.0
+        task.steps = []
+        task.error_message = ""
+        task.completed_at = None
+        task.analysis_detail = {
+            **(task.analysis_detail or {}),
+            "phase": "重新排队",
+            "retry_at": datetime.now(timezone.utc).isoformat(),
+        }
+        await db.commit()
+        await db.refresh(task)
+        asyncio.create_task(self._run_analysis_background(task_id))
+        return task
 
     async def list_tasks(self, db: AsyncSession, skip: int = 0, limit: int = 20) -> tuple[list[LearningTask], int]:
         from sqlalchemy import func as sqlfunc
@@ -119,9 +151,17 @@ class LearningService:
             raise ValueError("任务不存在")
         if task.status == "confirmed":
             raise ValueError("任务已确认，无法编辑步骤")
-        if task.status != "completed":
+        if task.status not in {"completed", "needs_review"}:
             raise ValueError(f"任务状态 {task.status} 不支持编辑步骤")
         task.steps = steps
+        analysis_detail = {
+            **(task.analysis_detail or {}),
+            "phase": "人工复核完成",
+        }
+        quality = self._evaluate_quality(steps, analysis_detail, manual_reviewed=True)
+        analysis_detail["quality"] = quality
+        task.analysis_detail = analysis_detail
+        task.status = "completed" if quality["passed"] else "needs_review"
         await db.commit()
         await db.refresh(task)
         return task
@@ -140,8 +180,13 @@ class LearningService:
                     "name": existing.name,
                     "step_count": len(task.steps or []),
                 }
+        if task.status == "needs_review":
+            raise ValueError("学习结果需要人工复核并保存后，才能确认生成模板")
         if task.status != "completed":
             raise ValueError(f"任务状态 {task.status} 不支持确认生成（仅 completed 可确认）")
+        quality = (task.analysis_detail or {}).get("quality")
+        if isinstance(quality, dict) and not quality.get("passed", False):
+            raise ValueError("学习结果质量评估未通过，请复核步骤后再生成模板")
 
         template = SOPTemplate(
             name=task.process_name,
@@ -159,6 +204,94 @@ class LearningService:
         await db.refresh(template)
 
         return {"template_id": template.id, "name": template.name, "step_count": len(task.steps or [])}
+
+    @staticmethod
+    def _evaluate_quality(
+        steps: list[dict[str, Any]] | None,
+        analysis_detail: dict[str, Any] | None,
+        *,
+        manual_reviewed: bool = False,
+    ) -> dict[str, Any]:
+        """评估学习结果是否适合直接生成 SOP 模板。"""
+        steps = steps or []
+        detail = analysis_detail or {}
+        step_count = len(steps)
+        duration_sec = float(detail.get("duration_sec") or 0.0)
+        segments_count = int(detail.get("segments_count") or 0)
+        confidence_raw = detail.get("confidence")
+        confidence = float(confidence_raw) if isinstance(confidence_raw, int | float) else None
+        segmentation_mode = str(detail.get("segmentation_mode") or "")
+        reference_frame_count = sum(1 for s in steps if s.get("reference_frame_b64") or s.get("reference_frame_url"))
+
+        issues: list[dict[str, str]] = []
+
+        def add_issue(code: str, message: str, severity: str = "warning") -> None:
+            issues.append({"code": code, "message": message, "severity": severity})
+
+        if step_count == 0:
+            add_issue("empty_steps", "未识别到任何 SOP 步骤", "error")
+
+        missing_name_count = sum(1 for s in steps if not str(s.get("name") or "").strip())
+        if missing_name_count:
+            add_issue("missing_step_name", f"{missing_name_count} 个步骤缺少名称", "error")
+
+        missing_criteria_count = sum(
+            1
+            for s in steps
+            if not str(s.get("ok_criteria") or "").strip()
+            or not str(s.get("ng_criteria") or "").strip()
+        )
+        if missing_criteria_count:
+            add_issue("missing_criteria", f"{missing_criteria_count} 个步骤缺少 OK/NG 判定标准", "error")
+
+        if confidence is not None and confidence < QUALITY_MIN_CONFIDENCE:
+            add_issue(
+                "low_confidence",
+                f"整体识别置信度 {confidence:.2f} 低于 {QUALITY_MIN_CONFIDENCE:.2f}",
+            )
+
+        if duration_sec >= QUALITY_LONG_VIDEO_SEC and step_count <= 1:
+            add_issue("few_steps_for_duration", f"{duration_sec:.1f} 秒视频仅生成 {step_count} 个步骤")
+
+        if duration_sec >= QUALITY_LONG_VIDEO_SEC and segments_count <= 1:
+            add_issue("coarse_segmentation", "动作分割过粗，建议人工确认是否需要拆分步骤")
+
+        if segmentation_mode == "uniform_fallback":
+            add_issue("segmentation_fallback_used", "运动分割过粗，系统已启用均匀细分兜底", "info")
+
+        if step_count > 0 and reference_frame_count < step_count:
+            add_issue("missing_reference_frame", f"{step_count - reference_frame_count} 个步骤缺少参考帧", "info")
+
+        hard_codes = {"empty_steps", "missing_step_name", "missing_criteria"}
+        reviewable_codes = {"low_confidence", "few_steps_for_duration", "coarse_segmentation"}
+        blocking_issues = [
+            i for i in issues
+            if i["code"] in hard_codes or (i["code"] in reviewable_codes and not manual_reviewed)
+        ]
+
+        score = 1.0
+        if confidence is not None:
+            score = min(score, confidence)
+        score -= 0.2 * sum(1 for i in issues if i["severity"] == "error")
+        score -= 0.1 * sum(1 for i in issues if i["severity"] == "warning")
+        score = max(0.0, round(score, 2))
+
+        passed = len(blocking_issues) == 0
+        return {
+            "passed": passed,
+            "status": "passed" if passed else "needs_review",
+            "score": score,
+            "manual_reviewed": manual_reviewed,
+            "issues": issues,
+            "metrics": {
+                "step_count": step_count,
+                "duration_sec": round(duration_sec, 1),
+                "segments_count": segments_count,
+                "confidence": confidence,
+                "reference_frame_count": reference_frame_count,
+                "segmentation_mode": segmentation_mode or "unknown",
+            },
+        }
 
     async def delete_task(self, task_id: str, db: AsyncSession) -> None:
         result = await db.execute(select(LearningTask).where(LearningTask.task_id == task_id))

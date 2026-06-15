@@ -27,6 +27,7 @@ from src.capture.rtsp_client import RTSPStream
 from src.comm.data_sync import OfflineDataSync, Priority
 from src.comm.mqtt_client import MQTTClient
 from src.engine.state_machine import SOPStateMachine, SOPStatus
+from src.engine.vlm_gate import VLMTriggerGate
 from src.inference.yolo_detector import ObjectTracker, YOLODetector
 from src.storage.sqlite_store import SQLiteStore
 
@@ -341,6 +342,16 @@ def main() -> None:
         global_detect=global_detect,
         min_consecutive_pass=int(os.environ.get("SOP_MIN_PASS", "3")),
     )
+    vlm_gate = VLMTriggerGate.from_env()
+    logger.info(
+        "VLM 门控: enabled={}, roi={}, stable_frames={}, cooldown={}s, min_conf={}, targets={}",
+        vlm_gate.config.enabled,
+        vlm_gate.config.roi or "全画面",
+        vlm_gate.config.stable_frames,
+        vlm_gate.config.cooldown_seconds,
+        vlm_gate.config.min_confidence,
+        sorted(vlm_gate.config.target_objects) or "任意",
+    )
 
     # 后台轮询：IDLE 时每 5 秒查询服务端是否有待处理工单
     _workorder_queue: Queue = Queue(maxsize=1)
@@ -395,16 +406,19 @@ def main() -> None:
                 fsm.load_template(tpl)
                 logger.info("工单指定模板 ID={}，已重载: {}", tpl_id, tpl.get("name"))
             fsm.start(sn)
+            vlm_gate.reset()
             logger.info("工单已启动: {}", sn)
             alerter.alert_warning()
         elif cmd == "override":
             reason = payload.get("reason", "MQTT 远程放行")
             operator = payload.get("operator_id", "remote")
             result = fsm.override(operator_badge=operator, reason=reason)
+            vlm_gate.reset()
             logger.info("MQTT override: {}", result)
             alerter.alert_warning()
         elif cmd == "reset":
             fsm.reset()
+            vlm_gate.reset()
             logger.info("MQTT reset: 状态机已重置")
             alerter.alert_idle()
 
@@ -419,6 +433,7 @@ def main() -> None:
     if auto_start:
         auto_sn = os.environ.get("SOP_AUTO_START_SN", f"AUTO-{time.strftime('%Y%m%d-%H%M%S')}")
         fsm.start(auto_sn)
+        vlm_gate.reset()
         logger.info("自动启动工单: {} (SOP_AUTO_START=1)", auto_sn)
     else:
         logger.info("边缘端就绪，等待工单启动指令（MQTT command: start_workorder）")
@@ -475,6 +490,7 @@ def main() -> None:
                     polled_sn = _workorder_queue.get_nowait()
                     logger.info("轮询启动工单: {}", polled_sn)
                     fsm.start(polled_sn)
+                    vlm_gate.reset()
                     alerter.alert_warning()
                 except Empty:
                     pass
@@ -555,11 +571,20 @@ def main() -> None:
                     })
                     last_mqtt_send_time = time.monotonic()
 
-            def _try_submit_vlm(f):
+            def _try_submit_vlm(f, dets):
                 nonlocal last_vlm_submit_time
                 if not vlm_worker or not vlm_worker.is_idle:
                     return
                 if fsm.status not in (SOPStatus.RUNNING,):
+                    return
+                decision = vlm_gate.should_submit(dets, f.shape)
+                if not decision.allowed:
+                    logger.debug(
+                        "VLM 门控未触发: reason={}, stable_hits={}, matched={}",
+                        decision.reason,
+                        decision.stable_hits,
+                        decision.matched_objects,
+                    )
                     return
                 sop_ctx = {
                     "steps": [
@@ -567,7 +592,12 @@ def main() -> None:
                          "required_objects": s.required_objects,
                          "action_type": s.action_type,
                          "timeout_seconds": s.timeout_seconds,
-                         "is_optional": s.is_optional}
+                         "is_optional": s.is_optional,
+                         "ok_criteria": s.ok_criteria,
+                         "ng_criteria": s.ng_criteria,
+                         "reference_frame_url": s.reference_frame_url,
+                         "reference_frame_b64": s.reference_frame_b64,
+                         "reference_frame_timestamp": s.reference_frame_timestamp}
                         for s in fsm.steps
                     ],
                     "current_step_index": fsm.current_step_index,
@@ -575,13 +605,17 @@ def main() -> None:
                 if fsm.global_detect:
                     sop_ctx["global_detect"] = True
                     sop_ctx["completed_indices"] = list(fsm.completed_indices)
+                sop_ctx["vlm_gate"] = {
+                    "reason": decision.reason,
+                    "matched_objects": decision.matched_objects,
+                }
                 vlm_worker.submit([f], sop_ctx)
                 last_vlm_submit_time = time.monotonic()
 
             if not motion.is_keyframe(frame):
                 # 即使无运动，VLM 空闲超过阈值也强制提交当前帧
                 if vlm_worker and vlm_worker.is_idle and (time.monotonic() - last_vlm_submit_time) >= vlm_idle_max:
-                    _try_submit_vlm(frame)
+                    _try_submit_vlm(frame, [])
                 mjpeg.update_frame(frame)
                 recorder.feed(frame, ts)
                 continue
@@ -596,7 +630,7 @@ def main() -> None:
                 d.get("class_name", d.get("label", "")) for d in det_dicts
             ] if det_dicts else []
 
-            _try_submit_vlm(frame)
+            _try_submit_vlm(frame, dets)
 
             # MQTT 消息节流：YOLO 检测结果定期发送
             now_mqtt = time.monotonic()
@@ -705,9 +739,11 @@ def main() -> None:
                 alerter.alert_ok()
                 logger.info("所有 SOP 步骤完成！")
                 fsm.reset()
+                vlm_gate.reset()
                 if os.environ.get("SOP_AUTO_START") == "1":
                     new_sn = f"AUTO-{time.strftime('%Y%m%d-%H%M%S')}"
                     fsm.start(new_sn)
+                    vlm_gate.reset()
                     logger.info("自动开始新工单: {} (SOP_AUTO_START=1)", new_sn)
                 else:
                     logger.info("状态机已重置为 IDLE，等待下一个工单")

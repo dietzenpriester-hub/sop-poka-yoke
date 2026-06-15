@@ -95,15 +95,18 @@ class VLMClient:
             return self._build_global_prompt(ctx)
         current = ctx.get("current_step_index", 0)
         steps = ctx.get("steps", [])
-        expected = steps[current].get("name", "未知") if current < len(steps) else "未知"
-        expected_desc = steps[current].get("description", "") if current < len(steps) else ""
-        desc_line = f"\n说明：{expected_desc}" if expected_desc else ""
+        step = steps[current] if current < len(steps) else {}
+        expected = step.get("name", "未知")
+        step_detail = self._format_step_detail(step)
         return (
-            f"你是SOP动作验证专家。当前期望步骤：{expected}{desc_line}\n\n"
+            f"你是SOP动作验证专家。当前期望步骤：{expected}\n"
+            f"{step_detail}\n\n"
             "仔细观察图片中操作员正在执行的具体动作。\n"
             "判定规则：\n"
             "- matches_expected=true: 操作员正在主动执行该步骤的核心动作（手部有明确的操作行为）\n"
-            "- matches_expected=false: 操作员处于等待、观察、空闲状态，或在执行其他不相关的操作\n"
+            "- 如果画面已经满足 OK 判定，也可返回 matches_expected=true\n"
+            "- matches_expected=false: 操作员处于等待、观察、空闲状态，执行其他不相关操作，或画面符合 NG 判定\n"
+            "- 必选对象未出现时，应降低置信度或返回 false\n"
             "注意：仅仅站在工位前、看着设备、或手放在设备附近不算在执行步骤。\n\n"
             "只返回JSON，格式如下：\n"
             '{"action": "<描述你看到的具体动作>", "matches_expected": true或false, "confidence": 0.0到1.0}'
@@ -117,7 +120,15 @@ class VLMClient:
             if i not in completed:
                 name = s.get("name", f"步骤{i + 1}")
                 desc = s.get("description", "")
-                remaining.append(f"  {i}: {name}" + (f" ({desc})" if desc else ""))
+                ok = s.get("ok_criteria", "")
+                ng = s.get("ng_criteria", "")
+                detail = f" ({desc})" if desc else ""
+                criteria = ""
+                if ok:
+                    criteria += f"；OK: {ok}"
+                if ng:
+                    criteria += f"；NG: {ng}"
+                remaining.append(f"  {i}: {name}{detail}{criteria}")
         steps_text = "\n".join(remaining) if remaining else "  (所有步骤已完成)"
         return (
             "你是 SOP 动作验证专家。以下是尚未完成的 SOP 步骤：\n"
@@ -127,6 +138,29 @@ class VLMClient:
             "只返回 JSON，格式如下：\n"
             '{"action": "<描述你看到的动作>", "matched_step": <步骤编号或-1>, "confidence": <0.0到1.0>}'
         )
+
+    @staticmethod
+    def _format_step_detail(step: dict) -> str:
+        lines = []
+        description = str(step.get("description") or "").strip()
+        action_type = str(step.get("action_type") or "").strip()
+        required_objects = step.get("required_objects") or []
+        ok_criteria = str(step.get("ok_criteria") or "").strip()
+        ng_criteria = str(step.get("ng_criteria") or "").strip()
+
+        if description:
+            lines.append(f"说明：{description}")
+        if action_type:
+            lines.append(f"动作类型：{action_type}")
+        if required_objects:
+            objects = "、".join(str(o) for o in required_objects if str(o).strip())
+            if objects:
+                lines.append(f"必选对象：{objects}")
+        if ok_criteria:
+            lines.append(f"OK 判定：{ok_criteria}")
+        if ng_criteria:
+            lines.append(f"NG 判定：{ng_criteria}")
+        return "\n".join(lines) if lines else "说明：无"
 
     def _parse_response(self, content: str) -> dict:
         content = content.strip()

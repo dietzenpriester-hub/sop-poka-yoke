@@ -18,6 +18,15 @@ vlm:
   timeout: 10.0
   num_ctx: 2048
 
+# 运行时通过同名环境变量 SOP_* 生效，用于减少空闲画面和单帧噪声触发 VLM。
+vlm_gate:
+  enabled: true
+  operation_roi: "0.1,0.1,0.9,0.9"
+  stable_frames: 2
+  cooldown_seconds: 1.0
+  min_detection_confidence: 0.25
+  target_objects: []
+
 engine:
   step_timeout_seconds: 60.0
   debounce_seconds: 0.5

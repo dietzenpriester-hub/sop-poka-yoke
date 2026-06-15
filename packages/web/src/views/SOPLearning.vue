@@ -6,7 +6,7 @@ import { parseErrorMsg } from "@/utils/httpError";
 import { formatDateTime } from "@/utils/date";
 
 function isAnalysisRunning(status: string): boolean {
-  return !["completed", "failed", "confirmed"].includes(status);
+  return !["completed", "failed", "confirmed", "needs_review"].includes(status);
 }
 
 function phaseProgress(status: string): string {
@@ -30,6 +30,7 @@ function statusLabel(status: string): string {
     phase_4: "阶段4·步骤组装",
     phase_5: "阶段5·参考帧绑定",
     completed: "已完成",
+    needs_review: "待复核",
     failed: "失败",
     confirmed: "已确认",
   };
@@ -40,8 +41,46 @@ function statusTagType(status: string): "info" | "success" | "warning" | "danger
   if (status === "failed") return "danger";
   if (status === "completed") return "success";
   if (status === "confirmed") return "success";
+  if (status === "needs_review") return "warning";
   if (isAnalysisRunning(status)) return "warning";
   return "info";
+}
+
+interface QualityIssue {
+  code: string;
+  message: string;
+  severity: string;
+}
+
+function qualityReport(task: LearningTask | null): Record<string, unknown> | null {
+  const quality = task?.analysis_detail?.quality;
+  if (!quality || typeof quality !== "object" || Array.isArray(quality)) return null;
+  return quality as Record<string, unknown>;
+}
+
+function qualityIssues(task: LearningTask | null): QualityIssue[] {
+  const issues = qualityReport(task)?.issues;
+  if (!Array.isArray(issues)) return [];
+  return issues.map((item) => {
+    const issue = item as Record<string, unknown>;
+    return {
+      code: String(issue.code || ""),
+      message: String(issue.message || ""),
+      severity: String(issue.severity || "warning"),
+    };
+  });
+}
+
+function qualityAlertType(task: LearningTask | null): "success" | "warning" {
+  return qualityReport(task)?.passed === true ? "success" : "warning";
+}
+
+function qualityAlertTitle(task: LearningTask | null): string {
+  const report = qualityReport(task);
+  if (!report) return "";
+  const score = typeof report.score === "number" ? `，评分 ${Math.round(report.score * 100)}%` : "";
+  if (report.passed === true && report.manual_reviewed === true) return `人工复核通过${score}`;
+  return report.passed === true ? `质量评估通过${score}` : `学习结果需要人工复核${score}`;
 }
 
 function normalizeStep(raw: Record<string, unknown>, index: number): LearningStep {
@@ -94,6 +133,7 @@ const currentTask = ref<LearningTask | null>(null);
 const editingSteps = ref<LearningStep[]>([]);
 const stepsSaving = ref(false);
 const confirmLoading = ref(false);
+const retryLoading = ref(false);
 
 let pollTimer: ReturnType<typeof setInterval> | null = null;
 let detailReqId = 0;
@@ -249,7 +289,12 @@ async function handleDelete(row: LearningTask) {
 
 const canEditSteps = computed(() => {
   const t = currentTask.value;
-  return t && (t.status === "completed" || t.status === "confirmed");
+  return Boolean(t && (t.status === "completed" || t.status === "needs_review"));
+});
+
+const canConfirmSteps = computed(() => {
+  const t = currentTask.value;
+  return Boolean(t && t.status === "completed" && editingSteps.value.length);
 });
 
 async function saveSteps() {
@@ -289,6 +334,22 @@ async function confirmGenerate() {
     ElMessage.error(parseErrorMsg(e, "生成失败"));
   } finally {
     confirmLoading.value = false;
+  }
+}
+
+async function retryAnalysis() {
+  if (!currentTask.value) return;
+  retryLoading.value = true;
+  try {
+    const { data } = await learningApi.retryTask(currentTask.value.task_id);
+    currentTask.value = data;
+    editingSteps.value = [];
+    ElMessage.success("分析任务已重新排队");
+    await loadTasks(false);
+  } catch (e) {
+    ElMessage.error(parseErrorMsg(e, "重试失败"));
+  } finally {
+    retryLoading.value = false;
   }
 }
 
@@ -413,6 +474,21 @@ function analysisDetailEntries(task: LearningTask): { key: string; value: string
             <el-descriptions-item v-if="currentTask.error_message" label="错误信息" :span="2">
               <el-alert type="error" :closable="false" show-icon>{{ currentTask.error_message }}</el-alert>
             </el-descriptions-item>
+            <el-descriptions-item v-if="qualityReport(currentTask)" label="质量评估" :span="2">
+              <el-alert
+                :type="qualityAlertType(currentTask)"
+                :title="qualityAlertTitle(currentTask)"
+                :closable="false"
+                show-icon
+                class="quality-alert"
+              >
+                <ul v-if="qualityIssues(currentTask).length" class="quality-issues">
+                  <li v-for="issue in qualityIssues(currentTask)" :key="issue.code + issue.message">
+                    {{ issue.message }}
+                  </li>
+                </ul>
+              </el-alert>
+            </el-descriptions-item>
             <el-descriptions-item label="模板 ID">
               {{ currentTask.template_id ?? "—" }}
             </el-descriptions-item>
@@ -509,10 +585,18 @@ function analysisDetailEntries(task: LearningTask): { key: string; value: string
             <el-button
               type="success"
               :loading="confirmLoading"
-              :disabled="!canEditSteps || !editingSteps.length"
+              :disabled="!canConfirmSteps"
               @click="confirmGenerate"
             >
               确认并生成模板
+            </el-button>
+            <el-button
+              v-if="currentTask.status === 'failed'"
+              type="warning"
+              :loading="retryLoading"
+              @click="retryAnalysis"
+            >
+              重试分析
             </el-button>
           </div>
         </template>
@@ -598,6 +682,16 @@ function analysisDetailEntries(task: LearningTask): { key: string; value: string
   display: flex;
   flex-wrap: wrap;
   gap: 12px;
+}
+
+.quality-alert {
+  width: 100%;
+}
+
+.quality-issues {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  line-height: 1.8;
 }
 
 .step-card-body {
