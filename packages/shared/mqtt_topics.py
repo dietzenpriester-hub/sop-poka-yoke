@@ -15,6 +15,7 @@ class MQTTTopics:
         self._prefix = p if p else self.DEFAULT_PREFIX
         base = self._prefix
         self.STEP_COMPLETE = f"{base}/{{station_id}}/step/complete"
+        self.STEP_VIDEO = f"{base}/{{station_id}}/step/video"
         self.ALERT_RAISE = f"{base}/{{station_id}}/alert/raise"
         self.WORKORDER_START = f"{base}/{{station_id}}/workorder/start"
         self.WORKORDER_DONE = f"{base}/{{station_id}}/workorder/done"
@@ -34,6 +35,9 @@ class MQTTTopics:
 
     def step_complete(self, station_id: str) -> str:
         return self._topic(self.STEP_COMPLETE, station_id)
+
+    def step_video(self, station_id: str) -> str:
+        return self._topic(self.STEP_VIDEO, station_id)
 
     def alert_raise(self, station_id: str) -> str:
         return self._topic(self.ALERT_RAISE, station_id)

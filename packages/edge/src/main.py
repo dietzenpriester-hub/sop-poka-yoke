@@ -12,6 +12,7 @@ import base64
 import dataclasses
 import json
 import os
+import re
 import threading
 import time
 from pathlib import Path
@@ -104,6 +105,40 @@ def _try_init_modbus():
     except Exception as e:
         logger.warning("Modbus 初始化失败，使用空操作模式: {}", e)
         return _NoopAlerter()
+
+
+def _try_init_minio():
+    """尝试初始化 MinIO 上传器，未配置凭证或连接失败时返回 None（降级为本地保存）。"""
+    try:
+        from src.comm.data_sync import MinIOUploader
+        uploader = MinIOUploader(
+            endpoint=os.environ.get("SOP_MINIO_ENDPOINT", "localhost:9000"),
+            bucket=os.environ.get("SOP_MINIO_BUCKET", "sop-videos"),
+            secure=os.environ.get("SOP_MINIO_SECURE", "0") == "1",
+        )
+        logger.info("MinIO 上传器已就绪")
+        return uploader
+    except Exception as e:
+        logger.warning("MinIO 初始化失败，录像仅本地保存、不上传: {}", e)
+        return None
+
+
+_CLIP_NAME_RE = re.compile(r"^(?P<sn>.+)_step(?P<step>\d+)_(?P<event>[A-Za-z_]+)_\d{8}_\d{6}\.mp4$")
+
+
+def _parse_clip_name(local_path: str) -> tuple[str, int, str] | None:
+    """从录像文件名解析 (work_order_sn, step_index, event_type)。
+
+    文件名格式见 VideoRecorder._get_clip_path：{sn}_step{step}_{event}_{ts}.mp4
+    """
+    name = Path(local_path).name
+    m = _CLIP_NAME_RE.match(name)
+    if not m:
+        return None
+    try:
+        return m.group("sn"), int(m.group("step")), m.group("event")
+    except ValueError:
+        return None
 
 
 def _try_init_vlm():
@@ -321,9 +356,47 @@ def main() -> None:
             mqtt_client.publish(topic, payload)
         logger.warning("[报警] {}", json.dumps(payload, ensure_ascii=False)[:200])
 
+    def send_step_event(payload: dict) -> None:
+        """发布步骤记录到服务端可消费的 step/complete 主题（数据闭环）。"""
+        topic = f"{mqtt_prefix}/{station_id}/step/complete"
+        payload.setdefault("station_id", station_id)
+        if mqtt_client:
+            mqtt_client.publish(topic, payload)
+        logger.info("[步骤] {}", json.dumps(payload, ensure_ascii=False)[:200])
+
+    minio_uploader = _try_init_minio()
     local_db = SQLiteStore(str(data_dir / "edge_local.db"))
+
+    def _sync_send(payload: dict) -> None:
+        """补传队列统一发送出口：视频走 MinIO 上传 + URL 回填，其余走检测主题。"""
+        if payload.get("type") == "video":
+            local_path = payload.get("local_path", "")
+            if not minio_uploader:
+                logger.warning("MinIO 未就绪，录像保留本地待补传: {}", local_path)
+                return
+            if not local_path or not Path(local_path).exists():
+                logger.warning("录像文件不存在，跳过上传: {}", local_path)
+                return
+            video_url = minio_uploader.upload_file(local_path)
+            parsed = _parse_clip_name(local_path)
+            if parsed and mqtt_client:
+                sn, step_index, event_type = parsed
+                mqtt_client.publish(
+                    f"{mqtt_prefix}/{station_id}/step/video",
+                    {
+                        "station_id": station_id,
+                        "work_order_sn": sn,
+                        "step_index": step_index,
+                        "event_type": event_type,
+                        "video_url": video_url,
+                    },
+                )
+            logger.info("录像已上传并回填: {} → {}", local_path, video_url)
+            return
+        send_detection(payload)
+
     sync = OfflineDataSync(
-        sender=lambda p: send_detection(p),
+        sender=_sync_send,
         dead_letter_store=local_db,
         dead_letter_jsonl=data_dir / "sync_dead_letter.jsonl",
     )
@@ -430,6 +503,9 @@ def main() -> None:
     stream.start()
 
     auto_start = os.environ.get("SOP_AUTO_START", "0") == "1"
+    # 防呆语义：生产环境下 STEP_NG / TIMEOUT 必须停线，等待人工 reset / override；
+    # 仅演示/测试模式（SOP_AUTO_START=1 或显式 SOP_AUTO_RECOVER=1）才自动恢复继续检测。
+    auto_recover = auto_start or os.environ.get("SOP_AUTO_RECOVER", "0") == "1"
     if auto_start:
         auto_sn = os.environ.get("SOP_AUTO_START_SN", f"AUTO-{time.strftime('%Y%m%d-%H%M%S')}")
         fsm.start(auto_sn)
@@ -463,6 +539,14 @@ def main() -> None:
                     "",
                     "",
                 )
+                send_step_event({
+                    "work_order_sn": fsm.work_order_sn or "",
+                    "step_index": tidx,
+                    "step_name": tstep.name if tstep else "",
+                    "result": "TIMEOUT",
+                    "confidence": 0.0,
+                    "event": "timeout",
+                })
                 alerter.alert_error()
                 send_alert({
                     "alert_code": "STEP_TIMEOUT",
@@ -470,10 +554,12 @@ def main() -> None:
                     "message": f"步骤超时: {timeout_evt}",
                     "step_index": fsm.current_step_index,
                 })
-                if os.environ.get("SOP_AUTO_START") == "1":
+                if auto_recover:
                     fsm.status = SOPStatus.RUNNING
                     fsm._step_start_time = time.time()
-                    logger.info("自动恢复: TIMEOUT → RUNNING（测试模式）")
+                    logger.info("自动恢复: TIMEOUT → RUNNING（演示/测试模式）")
+                else:
+                    logger.warning("步骤超时已停线，等待人工 reset / override（防呆模式）")
 
             item = stream.get_frame()
             if item is None:
@@ -527,10 +613,10 @@ def main() -> None:
                 send_status(status_msg)
                 last_mqtt_send_time = now_hb
 
-            if fsm.status == SOPStatus.TIMEOUT:
+            if fsm.status == SOPStatus.TIMEOUT and auto_recover:
                 fsm.status = SOPStatus.RUNNING
                 fsm._step_start_time = time.time()
-                logger.info("步骤超时自动恢复: TIMEOUT → RUNNING（继续检测）")
+                logger.info("步骤超时自动恢复: TIMEOUT → RUNNING（演示/测试模式）")
 
             # VLM 结果轮询（不受运动检测约束，确保推理完成后立即处理）
             vlm_action_text = ""
@@ -671,26 +757,37 @@ def main() -> None:
                 last_mqtt_send_time = now_mqtt
 
             if result.get("type") == "blocked":
-                if fsm.status in (SOPStatus.STEP_NG, SOPStatus.TIMEOUT):
+                if fsm.status in (SOPStatus.STEP_NG, SOPStatus.TIMEOUT) and auto_recover:
                     fsm.status = SOPStatus.RUNNING
                     fsm._step_start_time = time.time()
-                    logger.info("自动恢复: STEP_NG/TIMEOUT → RUNNING（继续检测）")
+                    logger.info("自动恢复: STEP_NG/TIMEOUT → RUNNING（演示/测试模式）")
                 else:
-                    logger.debug("状态机已阻塞: {}", result.get("reason", ""))
+                    # 防呆核心：NG/超时保持停线状态，红灯常亮，直至人工 reset / override
+                    alerter.alert_error()
+                    logger.debug("状态机已停线（待人工处理）: {}", result.get("reason", ""))
                 recorder.feed(frame, ts)
                 continue
 
             if result.get("event") == "step_ng":
                 cur = fsm.get_current_step()
+                ng_conf = float(result.get("confidence", 0) or 0)
                 local_db.save_step_record(
                     fsm.work_order_sn or "",
                     fsm.current_step_index,
                     cur.name if cur else "",
                     "NG",
-                    float(result.get("confidence", 0) or 0),
+                    ng_conf,
                     "",
                     "",
                 )
+                send_step_event({
+                    "work_order_sn": fsm.work_order_sn or "",
+                    "step_index": fsm.current_step_index,
+                    "step_name": cur.name if cur else "",
+                    "result": "NG",
+                    "confidence": ng_conf,
+                    "event": "step_ng",
+                })
                 alerter.alert_error()
                 recorder.trigger_save("STEP_NG", fsm.work_order_sn or "", fsm.current_step_index)
                 send_alert({
@@ -711,6 +808,14 @@ def main() -> None:
                         "",
                         "",
                     )
+                    send_step_event({
+                        "work_order_sn": fsm.work_order_sn or "",
+                        "step_index": sr.step_index,
+                        "step_name": sr.step_name,
+                        "result": sr.result,
+                        "confidence": sr.confidence,
+                        "event": "step_ok",
+                    })
                 alerter.alert_ok()
             elif result.get("event") == "override_ok":
                 if fsm.results:
@@ -724,6 +829,14 @@ def main() -> None:
                         "",
                         "",
                     )
+                    send_step_event({
+                        "work_order_sn": fsm.work_order_sn or "",
+                        "step_index": sr.step_index,
+                        "step_name": sr.step_name,
+                        "result": sr.result,
+                        "confidence": sr.confidence,
+                        "event": "override_ok",
+                    })
             elif result.get("event") == "complete":
                 if fsm.results:
                     sr = fsm.results[-1]
@@ -736,6 +849,14 @@ def main() -> None:
                         "",
                         "",
                     )
+                    send_step_event({
+                        "work_order_sn": fsm.work_order_sn or "",
+                        "step_index": sr.step_index,
+                        "step_name": sr.step_name,
+                        "result": sr.result,
+                        "confidence": sr.confidence,
+                        "event": "complete",
+                    })
                 alerter.alert_ok()
                 logger.info("所有 SOP 步骤完成！")
                 fsm.reset()

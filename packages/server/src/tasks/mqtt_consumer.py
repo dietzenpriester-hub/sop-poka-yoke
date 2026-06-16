@@ -103,6 +103,30 @@ async def _handle_alert(station_id: str, payload: dict) -> None:
         logger.warning("报警未入库，跳过 WebSocket 广播: station={}", station_id)
 
 
+async def _handle_step_record(station_id: str, payload: dict) -> None:
+    """消费 step/complete 事件 → 写入 StepRecord（数据闭环核心）。"""
+    from src.core.database import async_session_factory
+    from src.services.edge_ingest_service import ingest_step_record
+
+    try:
+        async with async_session_factory() as session:
+            await ingest_step_record(session, station_id, payload)
+    except Exception as e:
+        logger.error("步骤记录入库失败: station={} error={}", station_id, e)
+
+
+async def _handle_step_video(station_id: str, payload: dict) -> None:
+    """消费 step/video 事件 → 为步骤记录/报警回填 MinIO 视频 URL。"""
+    from src.core.database import async_session_factory
+    from src.services.edge_ingest_service import attach_step_video
+
+    try:
+        async with async_session_factory() as session:
+            await attach_step_video(session, station_id, payload)
+    except Exception as e:
+        logger.error("视频 URL 回填失败: station={} error={}", station_id, e)
+
+
 async def _validate_station(station_id: str) -> bool:
     """校验 station_id 是否已注册，未注册则拒绝处理。"""
     if station_id in _station_cache:
@@ -173,12 +197,19 @@ async def _dispatch_message(station_id: str, event_kind: str, payload: dict) -> 
             logger.warning("MQTT 告警来自未注册工位 {}，已丢弃", station_id)
             return
         await _handle_alert(station_id, payload)
-    else:
-        ws_ids = await _resolve_ws_station_ids(station_id)
-        logger.debug("MQTT→WS 转发: station_id={} event={} ws_ids={}", station_id, event_kind, ws_ids)
-        msg = {"topic": f"{settings.MQTT_TOPIC_PREFIX}/{station_id}/{event_kind}", "payload": payload}
-        for ws_id in ws_ids:
-            await broadcast_to_station(ws_id, msg)
+        return
+
+    # 步骤记录入库（数据闭环）：先持久化，再照常转发到 WebSocket
+    if event_kind == "step/complete":
+        await _handle_step_record(station_id, payload)
+    elif event_kind == "step/video":
+        await _handle_step_video(station_id, payload)
+
+    ws_ids = await _resolve_ws_station_ids(station_id)
+    logger.debug("MQTT→WS 转发: station_id={} event={} ws_ids={}", station_id, event_kind, ws_ids)
+    msg = {"topic": f"{settings.MQTT_TOPIC_PREFIX}/{station_id}/{event_kind}", "payload": payload}
+    for ws_id in ws_ids:
+        await broadcast_to_station(ws_id, msg)
 
 
 def _run_mqtt_loop(loop: asyncio.AbstractEventLoop) -> None:
