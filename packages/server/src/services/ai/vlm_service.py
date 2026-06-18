@@ -70,10 +70,11 @@ class VLMService:
         process_name: str,
     ) -> str:
         """发送少量帧，获取工序整体概览描述。"""
-        images_b64 = [self._encode_frame(f) for f in frames[:3]]
+        images_b64 = [self._encode_frame(f) for f in frames[:5]]
 
         prompt = (
             f"这是一段「{process_name}」工业制造工序的操作视频截图（按时间顺序排列）。\n"
+            "工序名称只是用户输入的标签，不能替代视觉判断；请只根据截图里真实可见的内容描述。\n"
             "请概述这段操作的整体流程，包括：\n"
             "1. 操作员大致在做什么\n"
             "2. 使用了哪些工具或物料\n"
@@ -120,9 +121,11 @@ class VLMService:
             f"以上是第 {segment_id + 1} 段操作的 {len(frames)} 张连续截图。\n"
             "请判断这几张图中操作员正在执行什么动作。\n\n"
             "要求：\n"
-            "1. 简短描述这个动作（一句话）\n"
-            "2. 这个动作与前序动作是否相同（如果相同请标注）\n"
-            "3. 用以下 JSON 格式回答：\n"
+            "1. 必须以截图里真实可见的手部、物体位置、状态变化为准，不要根据工序名称或检测物体猜测画面外动作\n"
+            "2. 简短描述这个动作（一句话）\n"
+            "3. 这个动作与前序动作是否相同（如果相同请标注）\n"
+            "4. 如果连续截图中看不出明确动作或状态变化，action 写「无法确认动作」，confidence 不高于 0.4\n"
+            "5. 用以下 JSON 格式回答：\n"
             '{"action": "动作名称", "description": "详细描述", '
             '"is_same_as_previous": false, "confidence": 0.9}\n\n'
             "仅返回 JSON，不要写其他内容。"
@@ -260,6 +263,9 @@ class VLMService:
             "]\n\n"
             "重要：\n"
             "- 保留所有步骤，不要合并或删减\n"
+            "- 只能基于上方动作段里明确出现的动作生成步骤，不要新增、想象或补全视频里没有看到的操作\n"
+            "- required_objects 只填写产品、工装、治具、关键物料；不要填写人、手、桌面、键盘、鼠标、椅子等现场背景物\n"
+            "- 如果物体只是视频里偶然出现，或与产品型号/工序无关，不要作为必选对象\n"
             "- ok_criteria 描述应具体可观测（如「螺丝完全拧入，与表面齐平」）\n"
             "- ng_criteria 描述应具体可判断（如「螺丝凸出、歪斜或未完全拧紧」）\n"
             "- timeout_seconds 根据动作复杂度合理设定\n"
@@ -351,6 +357,7 @@ class VLMService:
         prompt += (
             "\n请输出操作步骤 JSON 数组：\n"
             '[{"name": "步骤名", "description": "描述"}]\n'
+            "只把产品、工装、治具、关键物料写入 required_objects，不要把现场背景物当成 SOP 必选对象。\n"
             "仅输出 JSON。"
         )
         try:
@@ -378,7 +385,7 @@ class VLMService:
             "3. 标记可选步骤 is_optional: true/false\n"
             "4. 确保步骤顺序合理\n"
             "5. 如果概览中提到了额外的操作阶段但步骤中没有，请补充\n\n"
-            "重要：不要合并现有步骤，保留所有已识别的步骤。\n\n"
+            "重要：不要合并现有步骤，保留所有已识别的步骤；required_objects 只保留产品、工装、治具、关键物料，移除人、手、桌面、键盘、鼠标、椅子等现场背景物。\n\n"
             "输出格式（JSON 数组）：\n"
             '[{"index": 0, "name": "步骤名", "description": "描述", '
             '"action_type": "类型", "required_objects": ["..."], '

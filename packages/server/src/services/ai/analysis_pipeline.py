@@ -109,6 +109,7 @@ class AnalysisPipeline:
             "total_frames": extraction.total_frames,
             "fps": round(extraction.fps, 1),
             "duration_sec": round(extraction.duration_sec, 1),
+            "sampled_frames_count": extraction.sampled_frames_count,
             "segments_count": len(segments),
             "keyframes_count": len(extraction.keyframes),
             "segmentation_mode": extraction.segmentation_mode,
@@ -139,7 +140,14 @@ class AnalysisPipeline:
         # === Phase 3: VLM Segment-by-Segment Analysis (Core) ===
         await _report(0.32, "VLM 概览分析", {"current_phase": 3, "total_phases": 5, "phase": "VLM 整体概览"})
 
-        sample_indices = [0, len(frames_bgr) // 2, len(frames_bgr) - 1]
+        overview_sample_count = min(5, len(frames_bgr))
+        if overview_sample_count <= 1:
+            sample_indices = [0]
+        else:
+            sample_indices = [
+                round(i * (len(frames_bgr) - 1) / (overview_sample_count - 1))
+                for i in range(overview_sample_count)
+            ]
         sample_frames = [frames_bgr[i] for i in sample_indices if i < len(frames_bgr)]
         overview = await self.vlm_service.analyze_overview(sample_frames, process_name)
         logger.info("VLM 概览: {}", overview[:200])

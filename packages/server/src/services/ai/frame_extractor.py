@@ -45,6 +45,7 @@ class ExtractionResult:
     total_frames: int = 0
     fps: float = 0.0
     duration_sec: float = 0.0
+    sampled_frames_count: int = 0
     motion_profile: list[float] = field(default_factory=list)
     segmentation_mode: str = "motion"
 
@@ -68,8 +69,8 @@ class FrameExtractor:
         motion_smooth_window: int = 5,
         min_segment_sec: float = 1.5,
         pause_threshold_ratio: float = 0.3,
-        frames_per_segment: int = 3,
-        coarse_fallback_min_duration_sec: float = 8.0,
+        frames_per_segment: int = 4,
+        coarse_fallback_min_duration_sec: float = 4.0,
     ):
         self.max_keyframes = max_keyframes
         self.scene_threshold = scene_threshold
@@ -137,6 +138,8 @@ class FrameExtractor:
         if not sampled_frames:
             return result
 
+        result.sampled_frames_count = len(sampled_frames)
+
         smoothed = self._smooth_motion(motion_values)
         result.motion_profile = smoothed
 
@@ -177,11 +180,12 @@ class FrameExtractor:
         duration_sec: float,
         sampled_count: int,
     ) -> bool:
-        """当运动谷值无法切开较长视频时，用均匀分段避免整段合成一个步骤。"""
+        """当运动谷值无法切开视频时，用均匀分段避免整段合成一个步骤。"""
+        min_duration = max(self.coarse_fallback_min_duration_sec, self.min_segment_sec * 2)
         return (
-            duration_sec >= self.coarse_fallback_min_duration_sec
-            and len(segments) <= 1
-            and sampled_count >= 6
+            len(segments) <= 1
+            and duration_sec >= min_duration
+            and sampled_count >= max(8, self.frames_per_segment * 2)
         )
 
     def _smooth_motion(self, motion: list[float]) -> list[float]:
@@ -239,17 +243,28 @@ class FrameExtractor:
     ) -> list[ActionSegment]:
         """构建动作段，每段内提取代表性关键帧。"""
         if len(boundaries) < 2:
-            kf = KeyFrame(
-                index=sampled_frames[0][0],
-                timestamp_sec=sampled_frames[0][1],
-                frame_bgr=sampled_frames[0][2],
-                segment_id=0,
-            )
+            n_kf = min(self.frames_per_segment, len(sampled_frames))
+            if n_kf <= 1:
+                selected_indices = [0]
+            else:
+                selected_indices = [
+                    round(i * (len(sampled_frames) - 1) / (n_kf - 1))
+                    for i in range(n_kf)
+                ]
+            keyframes = [
+                KeyFrame(
+                    index=sampled_frames[i][0],
+                    timestamp_sec=sampled_frames[i][1],
+                    frame_bgr=sampled_frames[i][2],
+                    segment_id=0,
+                )
+                for i in sorted(set(selected_indices))
+            ]
             seg = ActionSegment(
                 segment_id=0,
                 start_sec=sampled_frames[0][1],
                 end_sec=sampled_frames[-1][1],
-                keyframes=[kf],
+                keyframes=keyframes,
             )
             return [seg]
 

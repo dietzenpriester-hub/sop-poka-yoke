@@ -297,6 +297,15 @@ const canConfirmSteps = computed(() => {
   return Boolean(t && t.status === "completed" && editingSteps.value.length);
 });
 
+const canRetryAnalysis = computed(() => {
+  const t = currentTask.value;
+  return Boolean(
+    t
+      && !t.template_id
+      && ["failed", "needs_review", "completed"].includes(t.status)
+  );
+});
+
 async function saveSteps() {
   if (!currentTask.value) return;
   stepsSaving.value = true;
@@ -339,6 +348,15 @@ async function confirmGenerate() {
 
 async function retryAnalysis() {
   if (!currentTask.value) return;
+  try {
+    const message = currentTask.value.status === "completed"
+      ? "重新分析会覆盖当前识别步骤，适合当前结果与视频明显不匹配的情况。是否继续？"
+      : "将使用原视频重新排队分析，是否继续？";
+    await ElMessageBox.confirm(message, "重新分析", { type: "warning" });
+  } catch (e) {
+    if (e !== "cancel") ElMessage.error(parseErrorMsg(e, "操作失败"));
+    return;
+  }
   retryLoading.value = true;
   try {
     const { data } = await learningApi.retryTask(currentTask.value.task_id);
@@ -591,12 +609,12 @@ function analysisDetailEntries(task: LearningTask): { key: string; value: string
               确认并生成模板
             </el-button>
             <el-button
-              v-if="currentTask.status === 'failed'"
+              v-if="canRetryAnalysis"
               type="warning"
               :loading="retryLoading"
               @click="retryAnalysis"
             >
-              重试分析
+              {{ currentTask.status === "completed" ? "重新分析" : "重试分析" }}
             </el-button>
           </div>
         </template>

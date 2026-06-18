@@ -38,6 +38,7 @@ export const workorderApi = {
   get: (id: number) => api.get<WorkOrderItem>(`/workorder/${id}`),
   create: (data: { sn: string; station_id?: number; sop_template_id?: number; operator_id?: number }) =>
     api.post<WorkOrderItem>("/workorder/", data),
+  start: (id: number) => api.post<{ message: string; edge_device_id: string | null }>(`/workorder/${id}/start`),
   complete: (id: number) => api.put(`/workorder/${id}/complete`),
   steps: (id: number) => api.get<StepRecordItem[]>(`/workorder/${id}/steps`),
   delete: (id: number) => api.delete(`/workorder/${id}`),

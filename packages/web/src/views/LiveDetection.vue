@@ -1,10 +1,12 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from "vue";
+import { ref, computed, onMounted, onUnmounted, watch } from "vue";
 import { ElMessage } from "element-plus";
 import {
   VideoPause,
   VideoPlay,
   Refresh,
+  Plus,
+  Link,
   Check,
   Close,
   Warning,
@@ -12,7 +14,10 @@ import {
   Connection,
 } from "@element-plus/icons-vue";
 import { stationApi, type StationItem } from "@/api/station";
+import { workorderApi, type WorkOrderItem } from "@/api/workorder";
+import { sopApi, type SOPTemplate } from "@/api/sop";
 import { useStationWebSocket } from "@/composables/useWebSocket";
+import { parseErrorMsg } from "@/utils/httpError";
 
 interface StepDetection {
   vlmAction: string;
@@ -52,7 +57,16 @@ interface SopStatus {
 const stations = ref<StationItem[]>([]);
 const selectedStationId = ref("");
 const loading = ref(false);
+const workorderLoading = ref(false);
+const creatingWorkorder = ref(false);
+const startingWorkorder = ref(false);
 const monitoring = ref(false);
+
+const runningWorkorders = ref<WorkOrderItem[]>([]);
+const templates = ref<SOPTemplate[]>([]);
+const selectedWorkorderId = ref<number | null>(null);
+const newWorkorderSn = ref("");
+const selectedTemplateId = ref<number | null>(null);
 
 const snapshotSrc = ref("");
 const sopStatus = ref<SopStatus | null>(null);
@@ -63,6 +77,32 @@ const lastUpdateTime = ref("");
 
 const steps = ref<StepInfo[]>([]);
 let _loadedSopName = "";
+
+const selectedStation = computed(() => {
+  return stations.value.find((s) => (s.edge_device_id || String(s.id)) === selectedStationId.value) || null;
+});
+
+const selectedWorkorder = computed(() => {
+  return runningWorkorders.value.find((w) => w.id === selectedWorkorderId.value) || null;
+});
+
+const templateNameById = computed(() => {
+  const m = new Map<number, string>();
+  for (const t of templates.value) {
+    m.set(t.id, `${t.name} v${t.version}`);
+  }
+  return m;
+});
+
+const canCreateWorkorder = computed(() => {
+  return Boolean(selectedStation.value && newWorkorderSn.value.trim() && selectedTemplateId.value && !monitoring.value);
+});
+
+const canStartMonitoring = computed(() => {
+  if (!selectedStation.value || monitoring.value || startingWorkorder.value) return false;
+  if (selectedWorkorderId.value) return true;
+  return Boolean(newWorkorderSn.value.trim() && selectedTemplateId.value);
+});
 
 function handleWsMessage(data: unknown) {
   const msg = data as Record<string, unknown>;
@@ -156,32 +196,132 @@ function addEvent(type: "info" | "success" | "warning" | "danger", text: string)
 async function loadStations() {
   loading.value = true;
   try {
-    const { data } = await stationApi.list();
-    stations.value = data;
-  } catch {
-    ElMessage.error("加载工位列表失败");
+    const [stationRes, templateRes] = await Promise.all([stationApi.list(), sopApi.list()]);
+    stations.value = stationRes.data;
+    templates.value = templateRes.data;
+    if (selectedStation.value) {
+      await loadRunningWorkorders();
+    }
+  } catch (e: unknown) {
+    ElMessage.error(parseErrorMsg(e, "加载工位或 SOP 模板失败"));
   } finally {
     loading.value = false;
   }
 }
 
-function startMonitoring() {
-  if (!selectedStationId.value) {
-    ElMessage.warning("请先选择工位");
-    return;
+async function loadRunningWorkorders(autoSelect = true) {
+  const station = selectedStation.value;
+  runningWorkorders.value = [];
+  selectedWorkorderId.value = null;
+  if (!station) return;
+
+  workorderLoading.value = true;
+  try {
+    const { data } = await workorderApi.list({
+      station_id: station.id,
+      status: "running",
+      limit: 100,
+    });
+    runningWorkorders.value = data.items;
+    if (autoSelect && data.items.length > 0) {
+      selectedWorkorderId.value = data.items[0].id;
+    }
+  } catch (e: unknown) {
+    ElMessage.error(parseErrorMsg(e, "加载运行中工单失败"));
+  } finally {
+    workorderLoading.value = false;
   }
-  monitoring.value = true;
+}
+
+function workorderLabel(wo: WorkOrderItem) {
+  const templateName = wo.sop_template_id ? templateNameById.value.get(wo.sop_template_id) || `模板 #${wo.sop_template_id}` : "未绑定 SOP";
+  return `${wo.sn} · ${templateName}`;
+}
+
+function resetMonitorState() {
   eventLog.value = [];
   steps.value = [];
   sopStatus.value = null;
   snapshotSrc.value = "";
+  yoloObjects.value = [];
+  detectionCount.value = 0;
+  lastUpdateTime.value = "";
   _loadedSopName = "";
-  addEvent("info", `开始监控工位 ${selectedStationId.value}`);
+}
+
+async function createAndBindWorkorder(showMessage = true): Promise<WorkOrderItem | null> {
+  const station = selectedStation.value;
+  const sn = newWorkorderSn.value.trim();
+  const templateId = selectedTemplateId.value || undefined;
+  if (!station) {
+    ElMessage.warning("请先选择工位");
+    return null;
+  }
+  if (!sn) {
+    ElMessage.warning("请填写新工单 SN");
+    return null;
+  }
+  if (!templateId) {
+    ElMessage.warning("请选择 SOP 模板");
+    return null;
+  }
+
+  creatingWorkorder.value = true;
+  try {
+    const { data } = await workorderApi.create({
+      sn,
+      station_id: station.id,
+      sop_template_id: templateId,
+    });
+    runningWorkorders.value = [data, ...runningWorkorders.value.filter((w) => w.id !== data.id)];
+    selectedWorkorderId.value = data.id;
+    newWorkorderSn.value = "";
+    if (showMessage) ElMessage.success("工单已创建并绑定");
+    return data;
+  } catch (e: unknown) {
+    ElMessage.error(parseErrorMsg(e, "创建工单失败"));
+    return null;
+  } finally {
+    creatingWorkorder.value = false;
+  }
+}
+
+async function startMonitoring() {
+  const station = selectedStation.value;
+  if (!station) {
+    ElMessage.warning("请先选择工位");
+    return;
+  }
+
+  let wo = selectedWorkorder.value;
+  let createdNow = false;
+  if (!wo) {
+    wo = await createAndBindWorkorder(false);
+    createdNow = Boolean(wo);
+  }
+  if (!wo) {
+    ElMessage.warning("请先选择运行中工单，或新建工单后再开始监控");
+    return;
+  }
+
+  startingWorkorder.value = true;
+  try {
+    if (!createdNow) {
+      await workorderApi.start(wo.id);
+    }
+    resetMonitorState();
+    monitoring.value = true;
+    addEvent("success", `${createdNow ? "创建并绑定" : "绑定"}工单 ${wo.sn}`);
+    addEvent("info", `开始监控工位 ${station.edge_device_id || station.id}`);
+  } catch (e: unknown) {
+    ElMessage.error(parseErrorMsg(e, "下发工单到边缘端失败"));
+  } finally {
+    startingWorkorder.value = false;
+  }
 }
 
 function stopMonitoring() {
   monitoring.value = false;
-  selectedStationId.value = "";
   addEvent("info", "停止监控");
 }
 
@@ -191,7 +331,7 @@ const progressPercent = computed(() => {
 });
 
 const statusColor = computed(() => {
-  if (!sopStatus.value) return "#909399";
+  if (!sopStatus.value) return wsReady.value ? "#909399" : "#f56c6c";
   switch (sopStatus.value.status) {
     case "running": return "#409eff";
     case "completed": return "#67c23a";
@@ -202,7 +342,7 @@ const statusColor = computed(() => {
 });
 
 const statusText = computed(() => {
-  if (!sopStatus.value) return "等待连接...";
+  if (!sopStatus.value) return wsReady.value ? "等待 SOP" : "连接中";
   switch (sopStatus.value.status) {
     case "running": return "检测中";
     case "completed": return "已完成";
@@ -212,12 +352,33 @@ const statusText = computed(() => {
   }
 });
 
+const sopEmptyDescription = computed(() => {
+  if (!wsReady.value) return "正在连接实时消息...";
+  if (!monitoring.value) return "请先选择工位并开始监控";
+  return "已连接，等待工单或 SOP 状态...";
+});
+
 const confidenceColor = computed(() => {
   if (!sopStatus.value) return "";
   const c = sopStatus.value.vlm_confidence;
   if (c >= 0.8) return "#67c23a";
   if (c >= 0.5) return "#e6a23c";
   return "#f56c6c";
+});
+
+watch(selectedStationId, () => {
+  if (monitoring.value) return;
+  selectedWorkorderId.value = null;
+  newWorkorderSn.value = "";
+  selectedTemplateId.value = null;
+  loadRunningWorkorders();
+});
+
+watch(selectedWorkorderId, (id) => {
+  const wo = runningWorkorders.value.find((item) => item.id === id);
+  if (wo?.sop_template_id) {
+    selectedTemplateId.value = wo.sop_template_id;
+  }
 });
 
 onMounted(() => {
@@ -254,20 +415,72 @@ onUnmounted(() => {
             v-model="selectedStationId"
             placeholder="选择工位"
             :disabled="monitoring"
-            style="width: 240px"
+            style="width: 220px"
           >
             <el-option
               v-for="s in stations"
               :key="s.id"
-              :label="`${s.name} (${s.line_id || '—'})`"
+              :label="`${s.name} (${s.edge_device_id || s.line_id || '—'})`"
               :value="s.edge_device_id || String(s.id)"
             />
           </el-select>
+          <el-select
+            v-model="selectedWorkorderId"
+            placeholder="选择运行中工单"
+            :disabled="monitoring || !selectedStationId"
+            :loading="workorderLoading"
+            filterable
+            clearable
+            style="width: 300px"
+          >
+            <el-option
+              v-for="wo in runningWorkorders"
+              :key="wo.id"
+              :label="workorderLabel(wo)"
+              :value="wo.id"
+            >
+              <div class="workorder-option">
+                <span>{{ wo.sn }}</span>
+                <small>{{ wo.sop_template_id ? templateNameById.get(wo.sop_template_id) || `模板 #${wo.sop_template_id}` : "未绑定 SOP" }}</small>
+              </div>
+            </el-option>
+          </el-select>
+          <el-input
+            v-model="newWorkorderSn"
+            placeholder="新工单 SN"
+            :disabled="monitoring || Boolean(selectedWorkorderId) || !selectedStationId"
+            clearable
+            style="width: 180px"
+          />
+          <el-select
+            v-model="selectedTemplateId"
+            placeholder="SOP 模板"
+            :disabled="monitoring || Boolean(selectedWorkorderId) || !selectedStationId"
+            filterable
+            clearable
+            style="width: 220px"
+          >
+            <el-option
+              v-for="t in templates"
+              :key="t.id"
+              :label="`${t.name} v${t.version}`"
+              :value="t.id"
+            />
+          </el-select>
+          <el-button
+            :icon="Plus"
+            :disabled="!canCreateWorkorder || Boolean(selectedWorkorderId)"
+            :loading="creatingWorkorder"
+            @click="createAndBindWorkorder()"
+          >
+            创建并绑定
+          </el-button>
           <el-button
             v-if="!monitoring"
             type="primary"
             :icon="VideoPlay"
-            :disabled="!selectedStationId"
+            :disabled="!canStartMonitoring"
+            :loading="startingWorkorder"
             @click="startMonitoring"
           >
             开始监控
@@ -280,11 +493,15 @@ onUnmounted(() => {
           >
             停止监控
           </el-button>
-          <el-button :icon="Refresh" @click="loadStations" :loading="loading">
-            刷新工位
+          <el-button :icon="Refresh" @click="loadStations" :loading="loading || workorderLoading">
+            刷新
           </el-button>
         </div>
         <div class="control-right">
+          <el-tag v-if="selectedWorkorder" type="primary" effect="plain" class="bound-workorder-tag">
+            <el-icon><Link /></el-icon>
+            {{ selectedWorkorder.sn }}
+          </el-tag>
           <span v-if="lastUpdateTime" class="last-update">
             最后更新: {{ lastUpdateTime }}
           </span>
@@ -411,7 +628,7 @@ onUnmounted(() => {
                 style="margin-top: 12px"
               />
             </div>
-            <el-empty v-else description="等待 SOP 状态..." :image-size="50" />
+            <el-empty v-else :description="sopEmptyDescription" :image-size="50" />
           </el-card>
 
           <!-- 步骤列表 + 检测详情 -->
@@ -517,7 +734,7 @@ onUnmounted(() => {
 
     <!-- 未开始监控 -->
     <div v-else class="idle-hint">
-      <el-empty description="请选择工位并点击「开始监控」">
+      <el-empty description="请选择工位并绑定工单后开始监控">
         <template #image>
           <el-icon :size="80" color="#c0c4cc"><Monitor /></el-icon>
         </template>
@@ -565,6 +782,33 @@ export default { components: { Monitor } };
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
+}
+
+.control-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.workorder-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.workorder-option small {
+  color: #909399;
+  font-size: 12px;
+}
+
+.bound-workorder-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 260px;
 }
 
 .last-update {

@@ -16,7 +16,13 @@ from src.services.ai.analysis_pipeline import AnalysisPipeline
 
 
 QUALITY_MIN_CONFIDENCE = 0.65
-QUALITY_LONG_VIDEO_SEC = 10.0
+QUALITY_MIN_MULTI_STEP_SEC = 5.0
+GENERIC_CONTEXT_VALUES = {
+    "测试", "测试1", "测试2", "test", "demo", "sample", "验证", "演示", "试验", "1", "2", "3"
+}
+SCENE_NOISE_OBJECTS = {
+    "person", "chair", "cell phone", "laptop", "keyboard", "mouse", "monitor", "桌子", "椅子", "人", "手"
+}
 
 
 class LearningService:
@@ -100,7 +106,12 @@ class LearningService:
             **(task.analysis_detail or {}),
             "phase": "分析完成",
         }
-        quality = self._evaluate_quality(steps, analysis_detail)
+        quality = self._evaluate_quality(
+            steps,
+            analysis_detail,
+            product_model=task.product_model,
+            process_name=task.process_name,
+        )
         analysis_detail["quality"] = quality
         task.analysis_detail = analysis_detail
         task.status = "completed" if quality["passed"] else "needs_review"
@@ -116,7 +127,7 @@ class LearningService:
         task = result.scalar_one_or_none()
         if not task:
             raise ValueError("任务不存在")
-        if task.status not in {"failed", "needs_review"}:
+        if task.status not in {"failed", "needs_review", "completed"}:
             raise ValueError(f"任务状态 {task.status} 不支持重试分析")
         if task.template_id is not None:
             raise ValueError("任务已生成模板，无法重试分析")
@@ -158,7 +169,13 @@ class LearningService:
             **(task.analysis_detail or {}),
             "phase": "人工复核完成",
         }
-        quality = self._evaluate_quality(steps, analysis_detail, manual_reviewed=True)
+        quality = self._evaluate_quality(
+            steps,
+            analysis_detail,
+            manual_reviewed=True,
+            product_model=task.product_model,
+            process_name=task.process_name,
+        )
         analysis_detail["quality"] = quality
         task.analysis_detail = analysis_detail
         task.status = "completed" if quality["passed"] else "needs_review"
@@ -211,6 +228,8 @@ class LearningService:
         analysis_detail: dict[str, Any] | None,
         *,
         manual_reviewed: bool = False,
+        product_model: str = "",
+        process_name: str = "",
     ) -> dict[str, Any]:
         """评估学习结果是否适合直接生成 SOP 模板。"""
         steps = steps or []
@@ -250,10 +269,10 @@ class LearningService:
                 f"整体识别置信度 {confidence:.2f} 低于 {QUALITY_MIN_CONFIDENCE:.2f}",
             )
 
-        if duration_sec >= QUALITY_LONG_VIDEO_SEC and step_count <= 1:
+        if duration_sec >= QUALITY_MIN_MULTI_STEP_SEC and step_count <= 1:
             add_issue("few_steps_for_duration", f"{duration_sec:.1f} 秒视频仅生成 {step_count} 个步骤")
 
-        if duration_sec >= QUALITY_LONG_VIDEO_SEC and segments_count <= 1:
+        if duration_sec >= QUALITY_MIN_MULTI_STEP_SEC and segments_count <= 1:
             add_issue("coarse_segmentation", "动作分割过粗，建议人工确认是否需要拆分步骤")
 
         if segmentation_mode == "uniform_fallback":
@@ -262,8 +281,31 @@ class LearningService:
         if step_count > 0 and reference_frame_count < step_count:
             add_issue("missing_reference_frame", f"{step_count - reference_frame_count} 个步骤缺少参考帧", "info")
 
+        normalized_context = {
+            "".join(product_model.strip().lower().split()),
+            "".join(process_name.strip().lower().split()),
+        }
+        if normalized_context & GENERIC_CONTEXT_VALUES:
+            add_issue("generic_context", "产品型号或工序名称过于泛化，无法确认学习视频是否匹配真实作业")
+
+        required_objects = sorted({
+            str(obj).strip()
+            for step in steps
+            for obj in (step.get("required_objects") or [])
+            if str(obj).strip()
+        })
+        noise_objects = [obj for obj in required_objects if obj.lower() in SCENE_NOISE_OBJECTS]
+        if noise_objects:
+            add_issue("scene_noise_objects", f"必选对象包含现场背景物体：{', '.join(noise_objects[:6])}")
+
         hard_codes = {"empty_steps", "missing_step_name", "missing_criteria"}
-        reviewable_codes = {"low_confidence", "few_steps_for_duration", "coarse_segmentation"}
+        reviewable_codes = {
+            "low_confidence",
+            "few_steps_for_duration",
+            "coarse_segmentation",
+            "generic_context",
+            "scene_noise_objects",
+        }
         blocking_issues = [
             i for i in issues
             if i["code"] in hard_codes or (i["code"] in reviewable_codes and not manual_reviewed)
@@ -290,6 +332,9 @@ class LearningService:
                 "confidence": confidence,
                 "reference_frame_count": reference_frame_count,
                 "segmentation_mode": segmentation_mode or "unknown",
+                "required_objects": required_objects,
+                "product_model": product_model,
+                "process_name": process_name,
             },
         }
 

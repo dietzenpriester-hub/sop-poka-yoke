@@ -1,18 +1,49 @@
 """工单管理 — 路由层仅做参数校验与响应包装，业务逻辑委托 WorkOrderService。"""
 
+import json
 from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from loguru import logger
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.core.config import settings
 from src.core.database import get_db
 from src.core.security import get_current_user, require_admin
+from src.models.station import Station
+from src.models.workorder import WorkOrder
 from src.schemas.workorder import StepRecordResponse, WorkOrderCreate, WorkOrderResponse
 from src.services.workorder_service import WorkOrderService
 
 router = APIRouter()
 _svc = WorkOrderService()
+
+
+async def _publish_start_workorder(db: AsyncSession, wo: WorkOrder) -> str | None:
+    """向工单绑定工位的边缘端下发启动指令。"""
+    if not wo.station_id:
+        return None
+
+    from src.tasks.mqtt_consumer import _mqtt_client
+
+    result = await db.execute(select(Station).where(Station.id == wo.station_id))
+    station = result.scalar_one_or_none()
+    edge_id = station.edge_device_id if station and station.edge_device_id else str(wo.station_id)
+
+    if not _mqtt_client:
+        logger.warning("MQTT 客户端未就绪，无法下发 start_workorder: sn={}", wo.sn)
+        return edge_id
+
+    topic = f"{settings.MQTT_TOPIC_PREFIX}/{edge_id}/command"
+    payload = json.dumps({
+        "command": "start_workorder",
+        "work_order_sn": wo.sn,
+        "sop_template_id": wo.sop_template_id,
+    })
+    _mqtt_client.publish(topic, payload)
+    logger.info("已向边缘端 {} 发送 start_workorder: sn={}, template_id={}", edge_id, wo.sn, wo.sop_template_id)
+    return edge_id
 
 
 @router.get("/")
@@ -51,29 +82,35 @@ async def start_workorder(
     # 创建工单后向边缘端发送 start_workorder 指令
     if data.station_id:
         try:
-            from sqlalchemy import select
-            from src.models.station import Station
-            from src.tasks.mqtt_consumer import _mqtt_client
-            from src.core.config import settings
-            import json
-
-            result = await db.execute(select(Station).where(Station.id == data.station_id))
-            station = result.scalar_one_or_none()
-            edge_id = station.edge_device_id if station and station.edge_device_id else str(data.station_id)
-
-            if _mqtt_client:
-                topic = f"{settings.MQTT_TOPIC_PREFIX}/{edge_id}/command"
-                payload = json.dumps({
-                    "command": "start_workorder",
-                    "work_order_sn": wo.sn,
-                    "sop_template_id": wo.sop_template_id,
-                })
-                _mqtt_client.publish(topic, payload)
-                logger.info("已向边缘端 {} 发送 start_workorder: sn={}, template_id={}", edge_id, wo.sn, wo.sop_template_id)
+            await _publish_start_workorder(db, wo)
         except Exception as e:
             logger.warning("发送 start_workorder 指令失败: {}", e)
 
     return wo
+
+
+@router.post("/{workorder_id}/start")
+async def start_existing_workorder(
+    workorder_id: int,
+    db: AsyncSession = Depends(get_db),
+    _user: dict = Depends(get_current_user),
+):
+    """将已有运行中工单下发到绑定工位的边缘端。"""
+    wo = await _svc.get_by_id(db, workorder_id)
+    if not wo:
+        raise HTTPException(status_code=404, detail="工单不存在")
+    if wo.status != "running":
+        raise HTTPException(status_code=400, detail="只能启动运行中的工单")
+    if not wo.station_id:
+        raise HTTPException(status_code=400, detail="工单未绑定工位")
+
+    try:
+        edge_id = await _publish_start_workorder(db, wo)
+    except Exception as e:
+        logger.warning("下发已有工单失败: {}", e)
+        raise HTTPException(status_code=500, detail="下发工单到边缘端失败") from e
+
+    return {"message": "工单已下发", "edge_device_id": edge_id}
 
 
 @router.get("/{workorder_id}", response_model=WorkOrderResponse)
