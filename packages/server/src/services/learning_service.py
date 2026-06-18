@@ -23,6 +23,19 @@ GENERIC_CONTEXT_VALUES = {
 SCENE_NOISE_OBJECTS = {
     "person", "chair", "cell phone", "laptop", "keyboard", "mouse", "monitor", "桌子", "椅子", "人", "手"
 }
+REVIEW_STATUS_PENDING = "pending"
+REVIEW_STATUS_CONFIRMED = "confirmed"
+REVIEW_STATUS_IGNORED = "ignored"
+REVIEW_STATUS_NEEDS_REWORK = "needs_rework"
+VALID_REVIEW_STATUSES = {
+    REVIEW_STATUS_PENDING,
+    REVIEW_STATUS_CONFIRMED,
+    REVIEW_STATUS_IGNORED,
+    REVIEW_STATUS_NEEDS_REWORK,
+}
+EVIDENCE_STATUS_SUPPORTED = "supported"
+EVIDENCE_STATUS_WEAK = "weak"
+EVIDENCE_STATUS_MISSING = "missing"
 
 
 class LearningService:
@@ -100,14 +113,14 @@ class LearningService:
         )
 
         task.progress = 1.0
-        task.steps = steps
+        task.steps = self._prepare_steps_for_review(steps, manual_reviewed=False)
         task.completed_at = datetime.now(timezone.utc)
         analysis_detail = {
             **(task.analysis_detail or {}),
             "phase": "分析完成",
         }
         quality = self._evaluate_quality(
-            steps,
+            task.steps,
             analysis_detail,
             product_model=task.product_model,
             process_name=task.process_name,
@@ -164,13 +177,14 @@ class LearningService:
             raise ValueError("任务已确认，无法编辑步骤")
         if task.status not in {"completed", "needs_review"}:
             raise ValueError(f"任务状态 {task.status} 不支持编辑步骤")
-        task.steps = steps
+        normalized_steps = self._prepare_steps_for_review(steps, manual_reviewed=True)
+        task.steps = normalized_steps
         analysis_detail = {
             **(task.analysis_detail or {}),
             "phase": "人工复核完成",
         }
         quality = self._evaluate_quality(
-            steps,
+            normalized_steps,
             analysis_detail,
             manual_reviewed=True,
             product_model=task.product_model,
@@ -205,12 +219,16 @@ class LearningService:
         if isinstance(quality, dict) and not quality.get("passed", False):
             raise ValueError("学习结果质量评估未通过，请复核步骤后再生成模板")
 
+        template_steps = self._build_template_steps(task.steps or [])
+        if not template_steps:
+            raise ValueError("没有已确认的有效步骤，无法生成模板")
+
         template = SOPTemplate(
             name=task.process_name,
             version="draft",
             product_model=task.product_model,
-            steps=task.steps,
-            description=f"AI 自动分析生成（任务 {task_id[:8]}...）",
+            steps=template_steps,
+            description=f"AI 辅助学习 + 人工复核生成（任务 {task_id[:8]}...）",
         )
         db.add(template)
         await db.flush()
@@ -220,7 +238,88 @@ class LearningService:
         await db.commit()
         await db.refresh(template)
 
-        return {"template_id": template.id, "name": template.name, "step_count": len(task.steps or [])}
+        return {"template_id": template.id, "name": template.name, "step_count": len(template_steps)}
+
+    @classmethod
+    def _prepare_steps_for_review(
+        cls,
+        steps: list[dict[str, Any]] | None,
+        *,
+        manual_reviewed: bool,
+    ) -> list[dict[str, Any]]:
+        """补齐人工复核字段。AI 生成的步骤默认只作为候选步骤。"""
+        prepared: list[dict[str, Any]] = []
+        reviewed_at = datetime.now(timezone.utc).isoformat()
+        for index, raw in enumerate(steps or []):
+            step = dict(raw)
+            try:
+                step["index"] = int(step.get("index", index))
+            except (TypeError, ValueError):
+                step["index"] = index
+
+            status = str(step.get("review_status") or REVIEW_STATUS_PENDING).strip()
+            if status not in VALID_REVIEW_STATUSES:
+                status = REVIEW_STATUS_PENDING
+            step["review_status"] = status
+
+            evidence_status = str(step.get("evidence_status") or "").strip()
+            if evidence_status not in {EVIDENCE_STATUS_SUPPORTED, EVIDENCE_STATUS_WEAK, EVIDENCE_STATUS_MISSING}:
+                evidence_status = cls._infer_evidence_status(step)
+            step["evidence_status"] = evidence_status
+
+            step["confirmation_note"] = str(step.get("confirmation_note") or "").strip()
+            step["human_reviewed"] = status in {
+                REVIEW_STATUS_CONFIRMED,
+                REVIEW_STATUS_IGNORED,
+                REVIEW_STATUS_NEEDS_REWORK,
+            }
+            if manual_reviewed and step["human_reviewed"] and not step.get("reviewed_at"):
+                step["reviewed_at"] = reviewed_at
+            prepared.append(step)
+        return prepared
+
+    @staticmethod
+    def _infer_evidence_status(step: dict[str, Any]) -> str:
+        name = str(step.get("name") or "")
+        if step.get("grounding_supported") is False or name == "无法确认动作":
+            return EVIDENCE_STATUS_MISSING
+        raw_confidence = step.get("grounding_confidence")
+        try:
+            confidence = float(raw_confidence)
+        except (TypeError, ValueError):
+            confidence = None
+        if confidence is not None and confidence < QUALITY_MIN_CONFIDENCE:
+            return EVIDENCE_STATUS_WEAK
+        if not step.get("reference_frame_b64") and not step.get("reference_frame_url"):
+            return EVIDENCE_STATUS_WEAK
+        return EVIDENCE_STATUS_SUPPORTED
+
+    @staticmethod
+    def _build_template_steps(steps: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        template_steps: list[dict[str, Any]] = []
+        review_only_keys = {
+            "review_status",
+            "evidence_status",
+            "confirmation_note",
+            "human_reviewed",
+            "reviewed_at",
+            "grounding_supported",
+            "grounding_confidence",
+            "grounding_issue",
+            "source_confidence",
+            "segment_ids",
+        }
+        for step in steps:
+            if step.get("review_status") != REVIEW_STATUS_CONFIRMED:
+                continue
+            item = {
+                key: value
+                for key, value in step.items()
+                if key not in review_only_keys
+            }
+            item["index"] = len(template_steps)
+            template_steps.append(item)
+        return template_steps
 
     @staticmethod
     def _evaluate_quality(
@@ -233,21 +332,36 @@ class LearningService:
     ) -> dict[str, Any]:
         """评估学习结果是否适合直接生成 SOP 模板。"""
         steps = steps or []
+        active_steps = [
+            s for s in steps
+            if s.get("review_status") != REVIEW_STATUS_IGNORED
+        ]
         detail = analysis_detail or {}
-        step_count = len(steps)
+        candidate_step_count = len(steps)
+        ignored_step_count = candidate_step_count - len(active_steps)
+        step_count = len(active_steps)
         duration_sec = float(detail.get("duration_sec") or 0.0)
         segments_count = int(detail.get("segments_count") or 0)
         confidence_raw = detail.get("confidence")
         confidence = float(confidence_raw) if isinstance(confidence_raw, int | float) else None
         segmentation_mode = str(detail.get("segmentation_mode") or "")
-        reference_frame_count = sum(1 for s in steps if s.get("reference_frame_b64") or s.get("reference_frame_url"))
+        reference_frame_count = sum(1 for s in active_steps if s.get("reference_frame_b64") or s.get("reference_frame_url"))
         grounding_confidences: list[float] = []
-        for step in steps:
+        for step in active_steps:
             raw = step.get("grounding_confidence")
             if isinstance(raw, int | float):
                 grounding_confidences.append(float(raw))
-        unsupported_grounding_count = sum(1 for s in steps if s.get("grounding_supported") is False)
+        unsupported_grounding_count = sum(1 for s in active_steps if s.get("grounding_supported") is False)
         low_grounding_count = sum(1 for v in grounding_confidences if v < QUALITY_MIN_CONFIDENCE)
+        confirmed_step_count = sum(
+            1 for s in active_steps
+            if s.get("review_status") == REVIEW_STATUS_CONFIRMED
+        )
+        needs_rework_count = sum(
+            1 for s in active_steps
+            if s.get("review_status") == REVIEW_STATUS_NEEDS_REWORK
+        )
+        unconfirmed_step_count = max(0, step_count - confirmed_step_count)
 
         issues: list[dict[str, str]] = []
 
@@ -257,13 +371,13 @@ class LearningService:
         if step_count == 0:
             add_issue("empty_steps", "未识别到任何 SOP 步骤", "error")
 
-        missing_name_count = sum(1 for s in steps if not str(s.get("name") or "").strip())
+        missing_name_count = sum(1 for s in active_steps if not str(s.get("name") or "").strip())
         if missing_name_count:
             add_issue("missing_step_name", f"{missing_name_count} 个步骤缺少名称", "error")
 
         missing_criteria_count = sum(
             1
-            for s in steps
+            for s in active_steps
             if not str(s.get("ok_criteria") or "").strip()
             or not str(s.get("ng_criteria") or "").strip()
         )
@@ -294,6 +408,12 @@ class LearningService:
         if low_grounding_count:
             add_issue("low_grounding_confidence", f"{low_grounding_count} 个步骤视觉证据置信度低于 {QUALITY_MIN_CONFIDENCE:.2f}")
 
+        if needs_rework_count:
+            add_issue("step_marked_needs_rework", f"{needs_rework_count} 个步骤被标记为需重新分析", "error")
+
+        if unconfirmed_step_count:
+            add_issue("step_confirmation_required", f"{unconfirmed_step_count} 个有效步骤尚未人工确认", "error")
+
         normalized_context = {
             "".join(product_model.strip().lower().split()),
             "".join(process_name.strip().lower().split()),
@@ -303,7 +423,7 @@ class LearningService:
 
         required_objects = sorted({
             str(obj).strip()
-            for step in steps
+            for step in active_steps
             for obj in (step.get("required_objects") or [])
             if str(obj).strip()
         })
@@ -311,7 +431,13 @@ class LearningService:
         if noise_objects:
             add_issue("scene_noise_objects", f"必选对象包含现场背景物体：{', '.join(noise_objects[:6])}")
 
-        hard_codes = {"empty_steps", "missing_step_name", "missing_criteria"}
+        hard_codes = {
+            "empty_steps",
+            "missing_step_name",
+            "missing_criteria",
+            "step_confirmation_required",
+            "step_marked_needs_rework",
+        }
         reviewable_codes = {
             "low_confidence",
             "few_steps_for_duration",
@@ -342,6 +468,11 @@ class LearningService:
             "issues": issues,
             "metrics": {
                 "step_count": step_count,
+                "candidate_step_count": candidate_step_count,
+                "confirmed_step_count": confirmed_step_count,
+                "unconfirmed_step_count": unconfirmed_step_count,
+                "ignored_step_count": ignored_step_count,
+                "needs_rework_count": needs_rework_count,
                 "duration_sec": round(duration_sec, 1),
                 "segments_count": segments_count,
                 "confidence": confidence,

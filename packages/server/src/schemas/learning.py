@@ -20,6 +20,17 @@ class LearningStepItem(BaseModel):
     start_sec: float = 0.0
     end_sec: float = 0.0
     segment_ids: list[int] = []
+    review_status: str = "pending"
+    evidence_status: str = ""
+    confirmation_note: str = ""
+    human_reviewed: bool = False
+    reviewed_at: str = ""
+    grounding_supported: bool | None = None
+    grounding_confidence: float | None = None
+    grounding_issue: str = ""
+    source_confidence: float | None = None
+
+    model_config = {"extra": "allow"}
 
 
 class LearningTaskResponse(BaseModel):

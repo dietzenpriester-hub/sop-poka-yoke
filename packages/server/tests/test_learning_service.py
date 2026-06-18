@@ -29,19 +29,34 @@ def _valid_step(name: str = "放置物料") -> dict:
         "ng_criteria": "物料未放入、偏位或未贴合定位边",
         "required_objects": ["material"],
         "timeout_seconds": 30,
+        "review_status": "confirmed",
+        "evidence_status": "supported",
+    }
+
+
+def _pending_step(name: str = "放置物料") -> dict:
+    return {
+        **_valid_step(name),
+        "review_status": "pending",
+        "human_reviewed": False,
     }
 
 
 def test_quality_gate_flags_low_confidence_and_coarse_steps():
     report = _svc._evaluate_quality(
-        [_valid_step()],
+        [_pending_step()],
         {"duration_sec": 19.3, "segments_count": 1, "confidence": 0.5},
     )
 
     codes = {issue["code"] for issue in report["issues"]}
     assert report["passed"] is False
     assert report["status"] == "needs_review"
-    assert {"low_confidence", "few_steps_for_duration", "coarse_segmentation"} <= codes
+    assert {
+        "low_confidence",
+        "few_steps_for_duration",
+        "coarse_segmentation",
+        "step_confirmation_required",
+    } <= codes
 
 
 def test_quality_gate_allows_manual_review_for_reviewable_issues():
@@ -103,6 +118,57 @@ async def test_confirm_rejects_unreviewed_low_quality_task(db_session):
 
     with pytest.raises(ValueError, match="需要人工复核"):
         await _svc.confirm_and_generate("learn-review-2", db_session)
+
+
+@pytest.mark.asyncio
+async def test_confirm_requires_every_active_step_confirmed(db_session):
+    task = LearningTask(
+        task_id="learn-review-3",
+        product_model="PCB-A100",
+        process_name="装配",
+        video_path="sop-learning/test.mp4",
+        status="needs_review",
+        progress=1.0,
+        steps=[],
+        analysis_detail={"duration_sec": 10.0, "segments_count": 2, "confidence": 0.9},
+    )
+    db_session.add(task)
+    await db_session.commit()
+
+    updated = await _svc.update_steps("learn-review-3", [_pending_step()], db_session)
+
+    assert updated.status == "needs_review"
+    assert updated.analysis_detail["quality"]["passed"] is False
+    with pytest.raises(ValueError, match="需要人工复核"):
+        await _svc.confirm_and_generate("learn-review-3", db_session)
+
+
+@pytest.mark.asyncio
+async def test_confirm_generates_template_from_confirmed_steps_only(db_session):
+    task = LearningTask(
+        task_id="learn-review-4",
+        product_model="PCB-A100",
+        process_name="装配",
+        video_path="sop-learning/test.mp4",
+        status="needs_review",
+        progress=1.0,
+        steps=[],
+        analysis_detail={"duration_sec": 10.0, "segments_count": 2, "confidence": 0.9},
+    )
+    db_session.add(task)
+    await db_session.commit()
+
+    ignored = {
+        **_valid_step("误识别候选"),
+        "review_status": "ignored",
+        "confirmation_note": "画面证据不足，忽略",
+    }
+    updated = await _svc.update_steps("learn-review-4", [_valid_step("有效步骤"), ignored], db_session)
+
+    assert updated.status == "completed"
+    result = await _svc.confirm_and_generate("learn-review-4", db_session)
+
+    assert result["step_count"] == 1
 
 
 @pytest.mark.asyncio

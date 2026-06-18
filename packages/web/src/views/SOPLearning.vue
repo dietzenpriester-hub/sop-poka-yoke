@@ -52,6 +52,9 @@ interface QualityIssue {
   severity: string;
 }
 
+type ReviewStatus = LearningStep["review_status"];
+type EvidenceStatus = LearningStep["evidence_status"];
+
 function qualityReport(task: LearningTask | null): Record<string, unknown> | null {
   const quality = task?.analysis_detail?.quality;
   if (!quality || typeof quality !== "object" || Array.isArray(quality)) return null;
@@ -83,6 +86,61 @@ function qualityAlertTitle(task: LearningTask | null): string {
   return report.passed === true ? `质量评估通过${score}` : `学习结果需要人工复核${score}`;
 }
 
+function inferEvidenceStatus(raw: Record<string, unknown>): EvidenceStatus {
+  if (raw.grounding_supported === false || raw.name === "无法确认动作") return "missing";
+  const confidence = typeof raw.grounding_confidence === "number" ? raw.grounding_confidence : null;
+  if (confidence !== null && confidence < 0.65) return "weak";
+  if (!raw.reference_frame_b64 && !raw.reference_frame_url) return "weak";
+  return "supported";
+}
+
+function reviewStatusLabel(status: ReviewStatus): string {
+  const map: Record<ReviewStatus, string> = {
+    pending: "待确认",
+    confirmed: "已确认",
+    ignored: "已忽略",
+    needs_rework: "需重分析",
+  };
+  return map[status] || status;
+}
+
+function reviewStatusTagType(status: ReviewStatus): "info" | "success" | "warning" | "danger" {
+  if (status === "confirmed") return "success";
+  if (status === "ignored") return "info";
+  if (status === "needs_rework") return "danger";
+  return "warning";
+}
+
+function evidenceStatusLabel(status: EvidenceStatus): string {
+  const map: Record<string, string> = {
+    supported: "证据充分",
+    weak: "证据偏弱",
+    missing: "证据不足",
+    "": "未评估",
+  };
+  return map[status] || status;
+}
+
+function evidenceStatusTagType(status: EvidenceStatus): "info" | "success" | "warning" | "danger" {
+  if (status === "supported") return "success";
+  if (status === "missing") return "danger";
+  if (status === "weak") return "warning";
+  return "info";
+}
+
+function groundingConfidenceText(step: LearningStep): string {
+  if (typeof step.grounding_confidence !== "number") return "";
+  return `${Math.round(step.grounding_confidence * 100)}%`;
+}
+
+function reviewProgressText(steps: LearningStep[] | undefined): string {
+  const list = steps || [];
+  const active = list.filter((s) => s.review_status !== "ignored");
+  if (!active.length) return "0/0";
+  const confirmed = active.filter((s) => s.review_status === "confirmed").length;
+  return `${confirmed}/${active.length}`;
+}
+
 function normalizeStep(raw: Record<string, unknown>, index: number): LearningStep {
   const req = raw.required_objects;
   const required_objects = Array.isArray(req) ? req.map(String) : [];
@@ -107,6 +165,19 @@ function normalizeStep(raw: Record<string, unknown>, index: number): LearningSte
     start_sec: typeof raw.start_sec === "number" ? raw.start_sec : 0,
     end_sec: typeof raw.end_sec === "number" ? raw.end_sec : 0,
     segment_ids,
+    review_status: ["pending", "confirmed", "ignored", "needs_rework"].includes(String(raw.review_status))
+      ? (raw.review_status as ReviewStatus)
+      : "pending",
+    evidence_status: ["supported", "weak", "missing"].includes(String(raw.evidence_status))
+      ? (raw.evidence_status as EvidenceStatus)
+      : inferEvidenceStatus(raw),
+    confirmation_note: typeof raw.confirmation_note === "string" ? raw.confirmation_note : "",
+    human_reviewed: Boolean(raw.human_reviewed),
+    reviewed_at: typeof raw.reviewed_at === "string" ? raw.reviewed_at : "",
+    grounding_supported: typeof raw.grounding_supported === "boolean" ? raw.grounding_supported : null,
+    grounding_confidence: typeof raw.grounding_confidence === "number" ? raw.grounding_confidence : null,
+    grounding_issue: typeof raw.grounding_issue === "string" ? raw.grounding_issue : "",
+    source_confidence: typeof raw.source_confidence === "number" ? raw.source_confidence : null,
   };
 }
 
@@ -292,9 +363,23 @@ const canEditSteps = computed(() => {
   return Boolean(t && (t.status === "completed" || t.status === "needs_review"));
 });
 
+const activeSteps = computed(() => editingSteps.value.filter((s) => s.review_status !== "ignored"));
+
+const confirmedStepCount = computed(() =>
+  activeSteps.value.filter((s) => s.review_status === "confirmed").length
+);
+
+const weakEvidenceCount = computed(() =>
+  activeSteps.value.filter((s) => s.evidence_status !== "supported").length
+);
+
+const allActiveStepsConfirmed = computed(() =>
+  activeSteps.value.length > 0 && confirmedStepCount.value === activeSteps.value.length
+);
+
 const canConfirmSteps = computed(() => {
   const t = currentTask.value;
-  return Boolean(t && t.status === "completed" && editingSteps.value.length);
+  return Boolean(t && t.status === "completed" && allActiveStepsConfirmed.value);
 });
 
 const canRetryAnalysis = computed(() => {
@@ -409,6 +494,11 @@ function analysisDetailEntries(task: LearningTask): { key: string; value: string
             <el-tag :type="statusTagType(row.status)" size="small">{{ statusLabel(row.status) }}</el-tag>
           </template>
         </el-table-column>
+        <el-table-column label="复核" width="100">
+          <template #default="{ row }">
+            <span class="review-progress">{{ reviewProgressText(row.steps) }}</span>
+          </template>
+        </el-table-column>
         <el-table-column label="进度" min-width="200">
           <template #default="{ row }">
             <el-progress
@@ -507,6 +597,12 @@ function analysisDetailEntries(task: LearningTask): { key: string; value: string
                 </ul>
               </el-alert>
             </el-descriptions-item>
+            <el-descriptions-item label="复核进度">
+              {{ confirmedStepCount }} / {{ activeSteps.length }}
+            </el-descriptions-item>
+            <el-descriptions-item label="弱证据步骤">
+              {{ weakEvidenceCount }}
+            </el-descriptions-item>
             <el-descriptions-item label="模板 ID">
               {{ currentTask.template_id ?? "—" }}
             </el-descriptions-item>
@@ -531,6 +627,14 @@ function analysisDetailEntries(task: LearningTask): { key: string; value: string
           </el-collapse>
 
           <h4 class="steps-heading">识别步骤（{{ editingSteps.length }} 步）</h4>
+          <el-alert
+            v-if="canEditSteps && !allActiveStepsConfirmed"
+            type="warning"
+            :closable="false"
+            show-icon
+            class="review-alert"
+            title="候选步骤需逐步复核后才能生成模板"
+          />
           <el-timeline v-if="editingSteps.length">
             <el-timeline-item v-for="(step, idx) in editingSteps" :key="idx" :timestamp="`#${idx + 1}`" placement="top">
               <el-card shadow="hover" class="step-card">
@@ -543,7 +647,33 @@ function analysisDetailEntries(task: LearningTask): { key: string; value: string
                     <div v-if="step.start_sec || step.end_sec" class="step-time-badge">
                       {{ formatTimeSec(step.start_sec) }} ~ {{ formatTimeSec(step.end_sec) }}
                     </div>
+                    <div class="step-review-row">
+                      <el-tag :type="evidenceStatusTagType(step.evidence_status)" size="small">
+                        {{ evidenceStatusLabel(step.evidence_status) }}
+                      </el-tag>
+                      <el-tag :type="reviewStatusTagType(step.review_status)" size="small">
+                        {{ reviewStatusLabel(step.review_status) }}
+                      </el-tag>
+                      <span v-if="groundingConfidenceText(step)" class="confidence-text">
+                        视觉证据 {{ groundingConfidenceText(step) }}
+                      </span>
+                    </div>
+                    <el-alert
+                      v-if="step.grounding_issue"
+                      type="warning"
+                      :closable="false"
+                      class="step-grounding-alert"
+                      :title="step.grounding_issue"
+                    />
                     <el-form label-width="120px" size="small" :disabled="!canEditSteps">
+                      <el-form-item label="复核结论">
+                        <el-radio-group v-model="step.review_status">
+                          <el-radio-button label="pending">待确认</el-radio-button>
+                          <el-radio-button label="confirmed">已确认</el-radio-button>
+                          <el-radio-button label="needs_rework">需重分析</el-radio-button>
+                          <el-radio-button label="ignored">忽略</el-radio-button>
+                        </el-radio-group>
+                      </el-form-item>
                       <el-form-item label="名称">
                         <el-input v-model="step.name" />
                       </el-form-item>
@@ -583,6 +713,9 @@ function analysisDetailEntries(task: LearningTask): { key: string; value: string
                       <el-form-item label="NG 判定">
                         <el-input v-model="step.ng_criteria" type="textarea" :rows="2" placeholder="不合格判定标准（如：螺丝凸出、歪斜或未拧紧）" />
                       </el-form-item>
+                      <el-form-item label="复核备注">
+                        <el-input v-model="step.confirmation_note" type="textarea" :rows="2" />
+                      </el-form-item>
                     </el-form>
                   </div>
                 </div>
@@ -598,7 +731,7 @@ function analysisDetailEntries(task: LearningTask): { key: string; value: string
               :disabled="!canEditSteps || !editingSteps.length"
               @click="saveSteps"
             >
-              保存步骤修改
+              保存复核结果
             </el-button>
             <el-button
               type="success"
@@ -608,6 +741,9 @@ function analysisDetailEntries(task: LearningTask): { key: string; value: string
             >
               确认并生成模板
             </el-button>
+            <span v-if="canEditSteps && !allActiveStepsConfirmed" class="confirm-disabled-tip">
+              {{ activeSteps.length - confirmedStepCount }} 个有效步骤待确认
+            </span>
             <el-button
               v-if="canRetryAnalysis"
               type="warning"
@@ -664,6 +800,11 @@ function analysisDetailEntries(task: LearningTask): { key: string; value: string
   margin-top: 2px;
 }
 
+.review-progress {
+  color: var(--el-text-color-regular);
+  font-variant-numeric: tabular-nums;
+}
+
 .mono {
   font-family: ui-monospace, monospace;
   font-size: 12px;
@@ -691,6 +832,10 @@ function analysisDetailEntries(task: LearningTask): { key: string; value: string
   font-size: 16px;
 }
 
+.review-alert {
+  margin-bottom: 14px;
+}
+
 .step-card {
   margin-bottom: 8px;
 }
@@ -700,6 +845,12 @@ function analysisDetailEntries(task: LearningTask): { key: string; value: string
   display: flex;
   flex-wrap: wrap;
   gap: 12px;
+  align-items: center;
+}
+
+.confirm-disabled-tip {
+  color: var(--el-color-warning);
+  font-size: 13px;
 }
 
 .quality-alert {
@@ -742,6 +893,23 @@ function analysisDetailEntries(task: LearningTask): { key: string; value: string
 .step-form-area {
   flex: 1;
   min-width: 0;
+}
+
+.step-review-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.confidence-text {
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+}
+
+.step-grounding-alert {
+  margin-bottom: 10px;
 }
 
 .step-time-badge {

@@ -16,6 +16,15 @@ export interface LearningStep {
   start_sec: number;
   end_sec: number;
   segment_ids: number[];
+  review_status: "pending" | "confirmed" | "ignored" | "needs_rework";
+  evidence_status: "supported" | "weak" | "missing" | "";
+  confirmation_note: string;
+  human_reviewed: boolean;
+  reviewed_at: string;
+  grounding_supported?: boolean | null;
+  grounding_confidence?: number | null;
+  grounding_issue?: string;
+  source_confidence?: number | null;
 }
 
 export interface LearningTask {
