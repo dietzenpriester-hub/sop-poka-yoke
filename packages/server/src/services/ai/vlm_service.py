@@ -75,6 +75,7 @@ class VLMService:
         prompt = (
             f"这是一段「{process_name}」工业制造工序的操作视频截图（按时间顺序排列）。\n"
             "工序名称只是用户输入的标签，不能替代视觉判断；请只根据截图里真实可见的内容描述。\n"
+            "不要推断物体功能角色；例如单独放在桌面的圆形木片，不能直接称为「盖子」，除非画面明确显示它与罐口盖合/打开。\n"
             "请概述这段操作的整体流程，包括：\n"
             "1. 操作员大致在做什么\n"
             "2. 使用了哪些工具或物料\n"
@@ -121,11 +122,14 @@ class VLMService:
             f"以上是第 {segment_id + 1} 段操作的 {len(frames)} 张连续截图。\n"
             "请判断这几张图中操作员正在执行什么动作。\n\n"
             "要求：\n"
-            "1. 必须以截图里真实可见的手部、物体位置、状态变化为准，不要根据工序名称或检测物体猜测画面外动作\n"
-            "2. 简短描述这个动作（一句话）\n"
-            "3. 这个动作与前序动作是否相同（如果相同请标注）\n"
-            "4. 如果连续截图中看不出明确动作或状态变化，action 写「无法确认动作」，confidence 不高于 0.4\n"
-            "5. 用以下 JSON 格式回答：\n"
+            "1. 必须比较第一张和最后一张截图，只描述这个时间段内真实发生的位置/姿态/状态变化\n"
+            "2. 不要从静态结果反推动作；例如第一张图里盖子已经在桌面，不能写「取下盖子」或「打开盖子」\n"
+            "3. 不要推断物体功能角色；例如单独放在桌面的圆形木片，不能直接称为「盖子」，应写「木质圆片」或「圆形木件」\n"
+            "4. 不要根据工序名称或检测物体猜测画面外动作\n"
+            "5. 简短描述这个动作（一句话）\n"
+            "6. 这个动作与前序动作是否相同（如果相同请标注）\n"
+            "7. 如果连续截图中看不出明确动作或状态变化，action 写「无法确认动作」，confidence 不高于 0.4\n"
+            "8. 用以下 JSON 格式回答：\n"
             '{"action": "动作名称", "description": "详细描述", '
             '"is_same_as_previous": false, "confidence": 0.9}\n\n'
             "仅返回 JSON，不要写其他内容。"
@@ -264,6 +268,8 @@ class VLMService:
             "重要：\n"
             "- 保留所有步骤，不要合并或删减\n"
             "- 只能基于上方动作段里明确出现的动作生成步骤，不要新增、想象或补全视频里没有看到的操作\n"
+            "- 不要把结果状态反写成动作；如果只看到盖子已经在桌上，不能写取下/打开盖子\n"
+            "- 不要推断物体功能角色；单独在桌面的圆形木片不要写成「盖子」，除非动作段明确看到它与罐口盖合/打开\n"
             "- required_objects 只填写产品、工装、治具、关键物料；不要填写人、手、桌面、键盘、鼠标、椅子等现场背景物\n"
             "- 如果物体只是视频里偶然出现，或与产品型号/工序无关，不要作为必选对象\n"
             "- ok_criteria 描述应具体可观测（如「螺丝完全拧入，与表面齐平」）\n"
@@ -295,6 +301,266 @@ class VLMService:
             logger.warning("步骤组装 VLM 调用失败: {}", e)
 
         return self._build_steps_from_merged(merged)
+
+    async def ground_steps_against_segments(
+        self,
+        steps: list[dict],
+        segments: list,
+        process_name: str,
+    ) -> list[dict]:
+        """用步骤对应的连续关键帧复核 SOP 文案，避免从静态结果反推动作。"""
+        if not steps:
+            return []
+
+        seg_map = {seg.segment_id: seg for seg in segments}
+        grounded_steps: list[dict] = []
+
+        for step in steps:
+            seg_ids = self._resolve_step_segment_ids(step, segments)
+            frames = []
+            segment_ranges = []
+            for sid in seg_ids:
+                seg = seg_map.get(sid)
+                if not seg:
+                    continue
+                frames.extend([kf.frame_bgr for kf in seg.keyframes])
+                segment_ranges.append(f"{seg.start_sec:.1f}s~{seg.end_sec:.1f}s")
+
+            grounded = dict(step)
+            if not frames:
+                grounded_steps.append(self._build_ungrounded_step(
+                    grounded,
+                    confidence=0.3,
+                    issue="缺少对应片段关键帧，无法校验该步骤是否真实可见",
+                ))
+                continue
+
+            sample_frames = self._sample_ordered_frames(frames, max_frames=6)
+            try:
+                checked = await self._ground_single_step(
+                    step=grounded,
+                    frames=sample_frames,
+                    process_name=process_name,
+                    segment_ranges=segment_ranges,
+                )
+                grounded_steps.append(checked)
+            except Exception as e:
+                logger.warning("步骤视觉证据校验失败: {}", e)
+                grounded_steps.append(self._build_ungrounded_step(
+                    grounded,
+                    confidence=min(float(grounded.get("source_confidence") or 0.4), 0.4),
+                    issue="视觉证据校验失败，需人工复核",
+                ))
+
+        return grounded_steps
+
+    async def _ground_single_step(
+        self,
+        step: dict,
+        frames: list[np.ndarray],
+        process_name: str,
+        segment_ranges: list[str],
+    ) -> dict:
+        images_b64 = [self._encode_frame(f) for f in frames]
+        step_json = json.dumps({
+            "name": step.get("name", ""),
+            "description": step.get("description", ""),
+            "action_type": step.get("action_type", ""),
+            "required_objects": step.get("required_objects", []),
+            "ok_criteria": step.get("ok_criteria", ""),
+            "ng_criteria": step.get("ng_criteria", ""),
+        }, ensure_ascii=False, indent=2)
+
+        prompt = (
+            f"工序：「{process_name}」\n"
+            f"片段时间：{', '.join(segment_ranges) or '未知'}\n"
+            f"当前待校验 SOP 步骤：\n```json\n{step_json}\n```\n\n"
+            f"以上 {len(frames)} 张图是该步骤对应片段的连续关键帧，按时间顺序排列。\n"
+            "请做视觉证据校验，并在必要时重写步骤。\n\n"
+            "硬性规则：\n"
+            "1. 只能描述连续关键帧里真实发生的变化；必须比较第一张与最后一张。\n"
+            "2. 不允许从结果状态倒推未出现的动作。例如：第一张图里盖子已经在桌面，不能写「打开盖子」「取下盖子」「放下盖子」。\n"
+            "3. 不允许推断物体功能角色；单独放在桌面的圆形木片不能称为「盖子」，除非该片段明确看到它与罐口发生盖合/打开关系。\n"
+            "4. 如果只看到物体已处于某个状态，应写成状态观察或当前可见动作；看不出动作时写「无法确认动作」。\n"
+            "5. OK/NG 判定也只能围绕可见对象和可见变化，不要加入画面外流程。\n"
+            "6. required_objects 只保留产品、工装、关键物料，去掉人、手、桌面、键盘、鼠标、椅子等背景物。\n\n"
+            "返回 JSON 对象：\n"
+            '{"supported": true, "name": "步骤名", "description": "只基于画面的描述", '
+            '"action_type": "pick/place/assemble/inspect/screw/open/other", '
+            '"required_objects": ["物体"], "ok_criteria": "可见合格标准", '
+            '"ng_criteria": "可见不合格标准", "confidence": 0.8, "issue": ""}\n\n'
+            "如果原步骤包含未被画面支持的动作，supported=false，并把 name/description 改成最保守的可见动作或「无法确认动作」。仅返回 JSON。"
+        )
+
+        raw = await self._chat(prompt, images_b64)
+        result = self._parse_grounding_result(raw)
+        return self._apply_grounding_result(step, result)
+
+    @staticmethod
+    def _resolve_step_segment_ids(step: dict, segments: list) -> list[int]:
+        seg_ids = step.get("segment_ids") or []
+        resolved: list[int] = []
+        for sid in seg_ids:
+            try:
+                resolved.append(int(sid))
+            except (TypeError, ValueError):
+                continue
+        if resolved:
+            return resolved
+
+        try:
+            start_sec = float(step.get("start_sec") or 0)
+        except (TypeError, ValueError):
+            start_sec = 0.0
+        for seg in segments:
+            if seg.start_sec <= start_sec <= seg.end_sec:
+                return [seg.segment_id]
+        return []
+
+    @staticmethod
+    def _sample_ordered_frames(frames: list[np.ndarray], max_frames: int) -> list[np.ndarray]:
+        if len(frames) <= max_frames:
+            return frames
+        indices = [
+            round(i * (len(frames) - 1) / (max_frames - 1))
+            for i in range(max_frames)
+        ]
+        return [frames[i] for i in sorted(set(indices))]
+
+    @staticmethod
+    def _parse_grounding_result(raw: str) -> dict:
+        content = raw.strip()
+        if "```" in content:
+            parts = content.split("```")
+            for part in parts[1:]:
+                lines = part.strip().split("\n", 1)
+                if len(lines) == 2:
+                    content = lines[1].rsplit("```", 1)[0]
+                    break
+                elif len(lines) == 1:
+                    content = lines[0].rsplit("```", 1)[0]
+                    break
+
+        content = content.strip()
+        if not content.startswith("{"):
+            start = content.find("{")
+            if start != -1:
+                end = content.rfind("}") + 1
+                content = content[start:end]
+
+        try:
+            result = json.loads(content)
+            return result if isinstance(result, dict) else {}
+        except json.JSONDecodeError:
+            logger.warning("视觉证据校验返回无法解析为 JSON: {}...", content[:200])
+            return {}
+
+    @staticmethod
+    def _build_ungrounded_step(step: dict, confidence: float, issue: str) -> dict:
+        grounded = dict(step)
+        grounded["name"] = "无法确认动作"
+        grounded["description"] = "关键帧缺少连续动作证据，系统无法确认该步骤。"
+        grounded["action_type"] = "other"
+        grounded["required_objects"] = []
+        grounded["ok_criteria"] = "视觉证据不足，需人工确认该步骤是否成立。"
+        grounded["ng_criteria"] = "视觉证据不足，无法自动生成 NG 判定。"
+        grounded["grounding_supported"] = False
+        grounded["grounding_confidence"] = round(max(0.0, min(0.45, confidence)), 2)
+        grounded["grounding_issue"] = issue
+        return VLMService._neutralize_unverified_functional_names(grounded)
+
+    @staticmethod
+    def _apply_grounding_result(step: dict, result: dict) -> dict:
+        grounded = dict(step)
+        if not result:
+            return VLMService._build_ungrounded_step(
+                grounded,
+                confidence=0.3,
+                issue="视觉证据校验返回不可解析，需人工复核",
+            )
+
+        for key in ("name", "description", "action_type", "ok_criteria", "ng_criteria"):
+            value = result.get(key)
+            if isinstance(value, str) and value.strip():
+                grounded[key] = value.strip()
+
+        required_objects = result.get("required_objects")
+        if isinstance(required_objects, list):
+            grounded["required_objects"] = [
+                str(obj).strip()
+                for obj in required_objects
+                if str(obj).strip()
+            ]
+
+        raw_supported = result.get("supported", False)
+        if isinstance(raw_supported, str):
+            supported = raw_supported.strip().lower() in {"true", "yes", "1", "支持", "是"}
+        else:
+            supported = bool(raw_supported)
+        try:
+            confidence = float(result.get("confidence", 0.0))
+        except (TypeError, ValueError):
+            confidence = 0.0
+        confidence = max(0.0, min(1.0, confidence))
+        has_result_description = isinstance(result.get("description"), str) and bool(result["description"].strip())
+        if not supported:
+            confidence = min(confidence, 0.45)
+            grounded["name"] = "无法确认动作"
+            grounded["action_type"] = "other"
+            grounded["ok_criteria"] = "视觉证据不足，需人工确认该步骤是否成立。"
+            grounded["ng_criteria"] = "视觉证据不足，无法自动生成 NG 判定。"
+            if not has_result_description:
+                grounded["description"] = "关键帧缺少连续动作证据，系统无法确认该步骤。"
+
+        grounded["grounding_supported"] = supported
+        grounded["grounding_confidence"] = round(confidence, 2)
+        grounded["grounding_issue"] = str(result.get("issue") or "").strip()
+        if not supported and not grounded["grounding_issue"]:
+            grounded["grounding_issue"] = "步骤缺少连续画面证据支持，需人工复核"
+        grounded = VLMService._neutralize_unverified_functional_names(grounded)
+        return grounded
+
+    @staticmethod
+    def _neutralize_unverified_functional_names(step: dict) -> dict:
+        """没有盖合关系证据时，避免把圆形木件脑补成盖子。"""
+        textual = " ".join(
+            str(step.get(key) or "")
+            for key in ("name", "description", "ok_criteria", "ng_criteria", "grounding_issue")
+        )
+        has_lid_word = any(word in textual for word in ("盖子", "罐盖", "瓶盖"))
+        has_lid_relation = any(word in textual for word in ("罐口", "盖合", "盖上", "盖回", "封口", "合盖"))
+        grounding_supported = step.get("grounding_supported") is not False
+        if not has_lid_word or (has_lid_relation and grounding_supported):
+            return step
+
+        replacements = {
+            "茶叶罐盖子": "木质圆片",
+            "红色茶叶罐的盖子": "木质圆片",
+            "木质盖子": "木质圆片",
+            "罐盖": "木质圆片",
+            "盖子": "圆形木件",
+            "瓶盖": "圆形木件",
+        }
+        neutralized = dict(step)
+        for key in ("name", "description", "ok_criteria", "ng_criteria", "grounding_issue"):
+            value = neutralized.get(key)
+            if not isinstance(value, str):
+                continue
+            for old, new in replacements.items():
+                value = value.replace(old, new)
+            neutralized[key] = value
+
+        objects = neutralized.get("required_objects")
+        if isinstance(objects, list):
+            cleaned = []
+            for obj in objects:
+                value = str(obj)
+                for old, new in replacements.items():
+                    value = value.replace(old, new)
+                if value.strip():
+                    cleaned.append(value.strip())
+            neutralized["required_objects"] = cleaned
+        return neutralized
 
     @staticmethod
     def _merge_segment_results(segment_results: list[dict]) -> list[dict]:

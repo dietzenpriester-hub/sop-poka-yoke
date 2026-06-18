@@ -210,10 +210,28 @@ class AnalysisPipeline:
                 frames_bgr, extraction, yolo_results, process_name, overview,
             )
 
+        if steps:
+            await _report(0.86, "步骤视觉证据校验", {
+                "current_phase": 4, "total_phases": 5,
+                "phase": "步骤视觉证据校验",
+                "step_count": len(steps),
+            })
+            steps = await self.vlm_service.ground_steps_against_segments(
+                steps, segments, process_name,
+            )
+
+        grounding_issues_count = sum(
+            1
+            for s in steps
+            if s.get("grounding_supported") is False
+            or float(s.get("grounding_confidence") or 0.0) < 0.65
+        )
+
         await _report(0.90, "步骤组装完成", {
             "current_phase": 4, "total_phases": 5,
             "phase": "步骤组装完成",
             "step_count": len(steps),
+            "grounding_issues_count": grounding_issues_count,
         })
 
         # === Phase 5: Reference Frame Binding ===
@@ -231,6 +249,7 @@ class AnalysisPipeline:
             "segments_count": len(segments),
             "segmentation_mode": extraction.segmentation_mode,
             "confidence": self._compute_overall_confidence(segment_results),
+            "grounding_issues_count": grounding_issues_count,
         })
 
         logger.info("分析管线完成: {} 个 SOP 步骤（{} 个动作段）", len(steps), len(segments))

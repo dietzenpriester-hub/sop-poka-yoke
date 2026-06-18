@@ -241,6 +241,13 @@ class LearningService:
         confidence = float(confidence_raw) if isinstance(confidence_raw, int | float) else None
         segmentation_mode = str(detail.get("segmentation_mode") or "")
         reference_frame_count = sum(1 for s in steps if s.get("reference_frame_b64") or s.get("reference_frame_url"))
+        grounding_confidences: list[float] = []
+        for step in steps:
+            raw = step.get("grounding_confidence")
+            if isinstance(raw, int | float):
+                grounding_confidences.append(float(raw))
+        unsupported_grounding_count = sum(1 for s in steps if s.get("grounding_supported") is False)
+        low_grounding_count = sum(1 for v in grounding_confidences if v < QUALITY_MIN_CONFIDENCE)
 
         issues: list[dict[str, str]] = []
 
@@ -281,6 +288,12 @@ class LearningService:
         if step_count > 0 and reference_frame_count < step_count:
             add_issue("missing_reference_frame", f"{step_count - reference_frame_count} 个步骤缺少参考帧", "info")
 
+        if unsupported_grounding_count:
+            add_issue("ungrounded_steps", f"{unsupported_grounding_count} 个步骤缺少连续画面证据支持")
+
+        if low_grounding_count:
+            add_issue("low_grounding_confidence", f"{low_grounding_count} 个步骤视觉证据置信度低于 {QUALITY_MIN_CONFIDENCE:.2f}")
+
         normalized_context = {
             "".join(product_model.strip().lower().split()),
             "".join(process_name.strip().lower().split()),
@@ -305,6 +318,8 @@ class LearningService:
             "coarse_segmentation",
             "generic_context",
             "scene_noise_objects",
+            "ungrounded_steps",
+            "low_grounding_confidence",
         }
         blocking_issues = [
             i for i in issues
@@ -332,6 +347,9 @@ class LearningService:
                 "confidence": confidence,
                 "reference_frame_count": reference_frame_count,
                 "segmentation_mode": segmentation_mode or "unknown",
+                "unsupported_grounding_count": unsupported_grounding_count,
+                "low_grounding_count": low_grounding_count,
+                "grounding_confidences": grounding_confidences,
                 "required_objects": required_objects,
                 "product_model": product_model,
                 "process_name": process_name,
