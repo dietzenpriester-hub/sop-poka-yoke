@@ -17,6 +17,11 @@ from src.services.ai.analysis_pipeline import AnalysisPipeline
 
 QUALITY_MIN_CONFIDENCE = 0.65
 QUALITY_MIN_MULTI_STEP_SEC = 5.0
+# 单个步骤跨度占全片比例上限：超过说明这一步很可能吞掉了相邻的其他动作
+QUALITY_MAX_STEP_SPAN_RATIO = 0.6
+# 动作段合并成步骤的比例上限，以及触发该检查所需的最少段数
+QUALITY_MAX_MERGE_RATIO = 3.0
+QUALITY_MERGE_CHECK_MIN_SEGMENTS = 3
 GENERIC_CONTEXT_VALUES = {
     "测试", "测试1", "测试2", "test", "demo", "sample", "验证", "演示", "试验", "1", "2", "3"
 }
@@ -362,6 +367,15 @@ class LearningService:
             if s.get("review_status") == REVIEW_STATUS_NEEDS_REWORK
         )
         unconfirmed_step_count = max(0, step_count - confirmed_step_count)
+        max_step_span_ratio = 0.0
+        if duration_sec > 0:
+            for step in active_steps:
+                start = step.get("start_sec")
+                end = step.get("end_sec")
+                if not isinstance(start, int | float) or not isinstance(end, int | float):
+                    continue
+                if end > start:
+                    max_step_span_ratio = max(max_step_span_ratio, (end - start) / duration_sec)
 
         issues: list[dict[str, str]] = []
 
@@ -395,6 +409,24 @@ class LearningService:
 
         if duration_sec >= QUALITY_MIN_MULTI_STEP_SEC and segments_count <= 1:
             add_issue("coarse_segmentation", "动作分割过粗，建议人工确认是否需要拆分步骤")
+
+        if duration_sec > 0 and max_step_span_ratio >= QUALITY_MAX_STEP_SPAN_RATIO:
+            add_issue(
+                "step_spans_whole_video",
+                f"单个步骤覆盖了全片 {max_step_span_ratio * 100:.0f}% 的时长，"
+                "可能把多个动作并成了一步",
+            )
+
+        if (
+            step_count > 0
+            and segments_count >= QUALITY_MERGE_CHECK_MIN_SEGMENTS
+            and segments_count / step_count >= QUALITY_MAX_MERGE_RATIO
+        ):
+            add_issue(
+                "over_merged_segments",
+                f"{segments_count} 个动作段被合并成 {step_count} 个步骤，"
+                "合并可能过度，建议确认是否漏掉了动作",
+            )
 
         if segmentation_mode == "uniform_fallback":
             add_issue("segmentation_fallback_used", "运动分割过粗，系统已启用均匀细分兜底", "info")
@@ -442,6 +474,8 @@ class LearningService:
             "low_confidence",
             "few_steps_for_duration",
             "coarse_segmentation",
+            "step_spans_whole_video",
+            "over_merged_segments",
             "generic_context",
             "scene_noise_objects",
             "ungrounded_steps",
@@ -475,6 +509,7 @@ class LearningService:
                 "needs_rework_count": needs_rework_count,
                 "duration_sec": round(duration_sec, 1),
                 "segments_count": segments_count,
+                "max_step_span_ratio": round(max_step_span_ratio, 2),
                 "confidence": confidence,
                 "reference_frame_count": reference_frame_count,
                 "segmentation_mode": segmentation_mode or "unknown",

@@ -59,6 +59,56 @@ def test_quality_gate_flags_low_confidence_and_coarse_steps():
     } <= codes
 
 
+def _timed_step(name: str, start: float, end: float) -> dict:
+    return {**_valid_step(name), "start_sec": start, "end_sec": end}
+
+
+def test_quality_gate_flags_step_spanning_whole_video():
+    """9 段被并成 1 步、该步覆盖 94% 时长，是真实录像里出现过的分段退化。"""
+    report = _svc._evaluate_quality(
+        [_timed_step("调整设备位置", 0.0, 14.1)],
+        {"duration_sec": 15.0, "segments_count": 9, "confidence": 0.9},
+    )
+
+    codes = {issue["code"] for issue in report["issues"]}
+    assert "step_spans_whole_video" in codes
+    assert "over_merged_segments" in codes
+    assert report["metrics"]["max_step_span_ratio"] == 0.94
+
+
+def test_quality_gate_flags_over_merged_segments_even_with_several_steps():
+    """步骤数不算少，但 9 段并成 3 步同样漏动作，旧规则只看步骤数会放过。"""
+    report = _svc._evaluate_quality(
+        [
+            _timed_step("手持设备放置桌面", 0.0, 1.3),
+            _timed_step("调整设备位置", 1.6, 7.7),
+            _timed_step("放置笔和木质圆片", 8.0, 14.1),
+        ],
+        {"duration_sec": 15.0, "segments_count": 9, "confidence": 0.9},
+    )
+
+    codes = {issue["code"] for issue in report["issues"]}
+    assert "over_merged_segments" in codes
+    assert "few_steps_for_duration" not in codes
+    assert "step_spans_whole_video" not in codes
+
+
+def test_quality_gate_accepts_reasonable_segmentation():
+    report = _svc._evaluate_quality(
+        [
+            _timed_step("取起水杯", 0.0, 3.0),
+            _timed_step("放到桌面左侧", 3.0, 6.0),
+            _timed_step("再次取起水杯", 6.0, 9.0),
+            _timed_step("放回桌面", 9.0, 12.0),
+        ],
+        {"duration_sec": 15.0, "segments_count": 8, "confidence": 0.9},
+    )
+
+    codes = {issue["code"] for issue in report["issues"]}
+    assert "step_spans_whole_video" not in codes
+    assert "over_merged_segments" not in codes
+
+
 def test_quality_gate_allows_manual_review_for_reviewable_issues():
     report = _svc._evaluate_quality(
         [_valid_step()],
