@@ -1,0 +1,42 @@
+{
+  "name": "DEMO-CUP 桌面取放水杯 SOP（标准学习原始输出）",
+  "version": "1.0",
+  "note": "由标准学习任务 f1701b2b 从 REC_20260817_160537.mp4 自动生成，未经人工修正。步骤划分与实际动作存在偏差，仅作留档对照，不用于评测。",
+  "steps": [
+    {
+      "name": "手持设备放置桌面",
+      "description": "操作员双手持黑色长方形设备，设备在桌面上保持竖立状态，未发生移动或倾倒。",
+      "required_objects": [
+        "黑色长方形电子设备"
+      ],
+      "action_type": "place",
+      "ok_criteria": "设备竖立放置于桌面，位置稳定，无倾斜或滑动。",
+      "ng_criteria": "设备未放置于桌面，或放置后倾倒、滑落、未竖立。",
+      "timeout_seconds": 0
+    },
+    {
+      "name": "调整设备位置",
+      "description": "操作员手持黑色长方形设备，将其从桌面初始位置略微调整，使其竖立在桌面中央。",
+      "required_objects": [
+        "黑色长方形电子设备"
+      ],
+      "action_type": "adjust",
+      "ok_criteria": "设备竖立于桌面中央，位置稳定，无明显偏移。",
+      "ng_criteria": "设备未调整至中央，或调整后仍倾斜、未竖立。",
+      "timeout_seconds": 0
+    },
+    {
+      "name": "放置笔和木质圆片",
+      "description": "操作员将白色笔和棕色圆形木件放置在黑色设备旁的桌面上，完成物品摆放。",
+      "required_objects": [
+        "白色笔",
+        "棕色圆形木件",
+        "黑色长方形电子设备"
+      ],
+      "action_type": "place",
+      "ok_criteria": "白色笔和棕色圆形木件均放置在黑色设备旁桌面，位置清晰可见，无掉落或遮挡。",
+      "ng_criteria": "笔或木件未放置，或放置位置超出设备旁范围，或物品掉落。",
+      "timeout_seconds": 0
+    }
+  ]
+}

@@ -1,0 +1,51 @@
+{
+  "name": "DEMO-CUP 桌面取放水杯 SOP（放置判据改为杯底到位）",
+  "version": "1.0",
+  "note": "在 sop_template.cup.json 基础上只改 place 步骤的判据：原判据要求「脱手、手离开杯身」，而正面机位下手放在桌面靠近杯子时 VLM 会误读成仍在握持，导致放置步骤判不出来。改为只看杯子是否竖立到位，不再要求判断手是否松开。",
+  "steps": [
+    {
+      "name": "第一次取起水杯",
+      "description": "操作员伸手握住桌面上的黑色保温杯，并把它抬离桌面",
+      "required_objects": [
+        "黑色保温杯"
+      ],
+      "action_type": "pick",
+      "ok_criteria": "水杯被手握住并已抬离桌面",
+      "ng_criteria": "拿起了错误物件，或取拿过程中把水杯碰倒、摔落",
+      "timeout_seconds": 0
+    },
+    {
+      "name": "将水杯放到桌面左侧",
+      "description": "操作员把握在手中的水杯放到桌面左侧",
+      "required_objects": [
+        "黑色保温杯"
+      ],
+      "action_type": "place",
+      "ok_criteria": "水杯竖立在桌面上，杯底已落在桌面，不再被提在半空",
+      "ng_criteria": "水杯倾倒、滑落，或掉到桌面以外",
+      "timeout_seconds": 0
+    },
+    {
+      "name": "第二次取起水杯",
+      "description": "操作员再次握住桌面左侧的黑色保温杯，把它抬离桌面举到身前",
+      "required_objects": [
+        "黑色保温杯"
+      ],
+      "action_type": "pick",
+      "ok_criteria": "水杯被手握住并已抬离桌面",
+      "ng_criteria": "拿起了错误物件，或取拿过程中把水杯碰倒、摔落",
+      "timeout_seconds": 0
+    },
+    {
+      "name": "将水杯放回桌面",
+      "description": "操作员把水杯放回桌面",
+      "required_objects": [
+        "黑色保温杯"
+      ],
+      "action_type": "place",
+      "ok_criteria": "水杯竖立在桌面上，杯底已落在桌面，不再被提在半空",
+      "ng_criteria": "水杯倾倒、滑落，或掉到桌面以外",
+      "timeout_seconds": 0
+    }
+  ]
+}

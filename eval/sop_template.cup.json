@@ -1,0 +1,43 @@
+{
+  "name": "DEMO-CUP 桌面取放水杯 SOP",
+  "version": "1.0",
+  "note": "在标准学习原始输出（sop_template.cup_learned.json）基础上人工复核修正：物件由「黑色长方形电子设备」更正为黑色保温杯；剔除画面中并不存在的「放置笔和木质圆片」步骤；按录像里实际发生的两轮取放重新划分步骤。",
+  "steps": [
+    {
+      "name": "第一次取起水杯",
+      "description": "操作员伸手握住桌面上的黑色保温杯，并把它抬离桌面",
+      "required_objects": ["黑色保温杯"],
+      "action_type": "pick",
+      "ok_criteria": "水杯被手握住并已抬离桌面",
+      "ng_criteria": "拿起了错误物件，或取拿过程中把水杯碰倒、摔落",
+      "timeout_seconds": 0
+    },
+    {
+      "name": "将水杯放到桌面左侧",
+      "description": "操作员把握在手中的水杯放到桌面左侧，松手离开",
+      "required_objects": ["黑色保温杯"],
+      "action_type": "place",
+      "ok_criteria": "水杯已脱手竖立在桌面上，手离开杯身",
+      "ng_criteria": "水杯倾倒、滑落，或掉到桌面以外",
+      "timeout_seconds": 0
+    },
+    {
+      "name": "第二次取起水杯",
+      "description": "操作员再次握住桌面左侧的黑色保温杯，把它抬离桌面举到身前",
+      "required_objects": ["黑色保温杯"],
+      "action_type": "pick",
+      "ok_criteria": "水杯被手握住并已抬离桌面",
+      "ng_criteria": "拿起了错误物件，或取拿过程中把水杯碰倒、摔落",
+      "timeout_seconds": 0
+    },
+    {
+      "name": "将水杯放回桌面",
+      "description": "操作员把水杯放回桌面并松手离开",
+      "required_objects": ["黑色保温杯"],
+      "action_type": "place",
+      "ok_criteria": "水杯已脱手竖立在桌面上，手离开杯身",
+      "ng_criteria": "水杯倾倒、滑落，或掉到桌面以外",
+      "timeout_seconds": 0
+    }
+  ]
+}
