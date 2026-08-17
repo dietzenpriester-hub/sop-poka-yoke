@@ -74,6 +74,23 @@ def _draw_hud(frame, elapsed: float, total: float, recording: bool):
     return canvas
 
 
+def preview_only(device: int, width: int, height: int) -> None:
+    """只出画不录制，用于摆机位时确认取景，按 q 退出。"""
+    cap = _open_camera(device, width, height)
+    print(f"摄像头 {device} 预览中，调好机位后在窗口里按 q 退出")
+    try:
+        while True:
+            ok, frame = cap.read()
+            if not ok:
+                continue
+            cv2.imshow("SOP 机位预览", _draw_hud(frame, 0, 0, recording=False))
+            if cv2.waitKey(1) & 0xFF == ord("q"):
+                break
+    finally:
+        cap.release()
+        cv2.destroyAllWindows()
+
+
 def _countdown(cap: cv2.VideoCapture, seconds: int, preview: bool) -> None:
     if seconds <= 0:
         return
@@ -188,7 +205,14 @@ def main() -> None:
         "--countdown", type=int, default=3, help="开录前的准备倒计时（秒）"
     )
     parser.add_argument("--no-preview", action="store_true", help="不弹预览窗口")
+    parser.add_argument(
+        "--preview-only", action="store_true", help="只开预览窗口用于摆机位，不录制"
+    )
     args = parser.parse_args()
+
+    if args.preview_only:
+        preview_only(args.device, args.width, args.height)
+        return
 
     out_path = args.out_dir / f"{args.name}_{time.strftime('%Y%m%d_%H%M%S')}.mp4"
     saved = record(
