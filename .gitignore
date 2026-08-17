@@ -63,3 +63,8 @@ e2e/node_modules/
 *.sqlite
 *.sqlite3
 packages/server/yolo11n.pt
+/yolo11n.pt
+
+# 动作识别评测产物（标注 CSV 需入 Git，缩略图与结果不需要）
+eval/results/
+eval/annotations/*_contact_sheet.jpg

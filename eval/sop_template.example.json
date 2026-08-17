@@ -1,0 +1,33 @@
+{
+  "name": "评测示例 SOP",
+  "version": "1.0",
+  "steps": [
+    {
+      "name": "取放物料",
+      "description": "从料盒取出物料并放入治具",
+      "required_objects": ["material", "fixture"],
+      "action_type": "pick_place",
+      "ok_criteria": "物料完全进入治具并贴合定位边",
+      "ng_criteria": "物料偏位、未贴合定位边或放入错误治具",
+      "timeout_seconds": 60
+    },
+    {
+      "name": "拧紧螺丝",
+      "description": "用电批将螺丝拧入固定孔位",
+      "required_objects": ["screwdriver", "screw"],
+      "action_type": "fasten",
+      "ok_criteria": "螺丝完全拧入且电批已离开孔位",
+      "ng_criteria": "螺丝未拧到位、漏拧或滑牙",
+      "timeout_seconds": 60
+    },
+    {
+      "name": "外观确认",
+      "description": "确认成品外观无划伤与错件",
+      "required_objects": ["product"],
+      "action_type": "inspect",
+      "ok_criteria": "操作员完成目视检查且成品无缺陷",
+      "ng_criteria": "存在划伤、错件或漏装",
+      "timeout_seconds": 60
+    }
+  ]
+}

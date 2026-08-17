@@ -1,0 +1,34 @@
+{
+  "name": "桌面颈绳操作测试片段 SOP",
+  "version": "4.0",
+  "note": "v4：NG 只描述真正的缺陷。桌面上的眼镜是干扰物，拿起眼镜视为 NG。步骤2 在片段中从未发生，用于检验模型能否拒绝误放行。等待或尚未松开不算 NG。",
+  "steps": [
+    {
+      "name": "单手撑头待命",
+      "description": "操作员一只手抬到头部附近（撑头或挠头），另一只手搭在桌面上，双手都没有在胸前捏持任何物件",
+      "required_objects": ["keyboard"],
+      "action_type": "standby",
+      "ok_criteria": "双手没有在胸前捏住颈绳，至少一只手抬在头部附近或搭在桌面",
+      "ng_criteria": "拿起了桌面上的眼镜或其他干扰物",
+      "timeout_seconds": 0
+    },
+    {
+      "name": "双手在胸前捏持颈绳",
+      "description": "操作员双手在胸前汇合，用手指捏住挂在颈前的细绳并保持",
+      "required_objects": ["hand"],
+      "action_type": "hold",
+      "ok_criteria": "双手在胸前且手指捏住颈前的细绳",
+      "ng_criteria": "拿起了眼镜而非颈绳，或把颈绳拉断",
+      "timeout_seconds": 0
+    },
+    {
+      "name": "松开颈绳双手放回桌面",
+      "description": "操作员松开颈绳，双手落回桌面并离开胸前",
+      "required_objects": ["hand"],
+      "action_type": "place",
+      "ok_criteria": "颈绳已脱手，双手明确落回桌面",
+      "ng_criteria": "把眼镜从桌面拿走，或把物件摔落",
+      "timeout_seconds": 0
+    }
+  ]
+}

@@ -51,9 +51,15 @@ _STEP_KW_FIELDS = {f.name for f in fields(StepDefinition)} - {"index"}
 class SOPStateMachine:
     MIN_CONFIDENCE = 0.75
 
-    def __init__(self, sop_template: dict, debounce_seconds: float = 0.5,
-                 ng_tolerance: int = 3, global_detect: bool = False,
-                 min_consecutive_pass: int = 3) -> None:
+    def __init__(
+        self,
+        sop_template: dict,
+        debounce_seconds: float = 0.5,
+        ng_tolerance: int = 3,
+        global_detect: bool = False,
+        min_consecutive_pass: int = 3,
+        timeout_stops_line: bool = False,
+    ) -> None:
         self.template_name = sop_template["name"]
         self.steps = []
         for i, raw in enumerate(sop_template["steps"]):
@@ -65,6 +71,8 @@ class SOPStateMachine:
         self.ng_tolerance = ng_tolerance
         self.global_detect = global_detect
         self.min_consecutive_pass = max(min_consecutive_pass, 1)
+        # 默认不停线：防呆判的是动作对错，不是节拍快慢
+        self.timeout_stops_line = timeout_stops_line
         self.status = SOPStatus.IDLE
         self.current_step_index = 0
         self.completed_indices: set[int] = set()
@@ -76,6 +84,7 @@ class SOPStateMachine:
         self._pending_since: float = 0.0
         self._consecutive_ng: int = 0
         self._consecutive_ok: int = 0
+        self._timeout_warned_index: int | None = None
 
     def load_template(self, sop_template: dict) -> None:
         """动态加载新的 SOP 模板（仅在 IDLE 状态允许）。"""
@@ -103,8 +112,14 @@ class SOPStateMachine:
         self._pending_since = 0.0
         self._consecutive_ng = 0
         self._consecutive_ok = 0
-        logger.info("工单开始: SN={}, SOP={}, 全局检测={}, 连续通过要求={}",
-                    work_order_sn, self.template_name, self.global_detect, self.min_consecutive_pass)
+        self._timeout_warned_index = None
+        logger.info(
+            "工单开始: SN={}, SOP={}, 全局检测={}, 连续通过要求={}",
+            work_order_sn,
+            self.template_name,
+            self.global_detect,
+            self.min_consecutive_pass,
+        )
 
     def get_current_step(self) -> StepDefinition | None:
         if self.current_step_index < len(self.steps):
@@ -130,41 +145,79 @@ class SOPStateMachine:
 
         matches = action_result.get("matches_expected", False)
         confidence = action_result.get("confidence", 0.0)
+        ng_violation = bool(action_result.get("ng_violation", False))
+        if matches:
+            ng_violation = False
 
         if matches and confidence >= self.MIN_CONFIDENCE:
             self._consecutive_ng = 0
             self._consecutive_ok += 1
-            logger.info("动作匹配 ({}/{}): 步骤 [{}], conf={:.2f}",
-                        self._consecutive_ok, self.min_consecutive_pass, current_step.name, confidence)
+            logger.info(
+                "动作匹配 ({}/{}): 步骤 [{}], conf={:.2f}",
+                self._consecutive_ok,
+                self.min_consecutive_pass,
+                current_step.name,
+                confidence,
+            )
 
             if self._consecutive_ok < self.min_consecutive_pass:
-                return {"event": "matching", "message": f"动作匹配中 ({self._consecutive_ok}/{self.min_consecutive_pass})", "confidence": confidence}
+                return {
+                    "event": "matching",
+                    "message": f"动作匹配中 ({self._consecutive_ok}/{self.min_consecutive_pass})",
+                    "confidence": confidence,
+                }
 
             self._consecutive_ok = 0
-            self.results.append(StepResult(
-                step_index=self.current_step_index, step_name=current_step.name,
-                result="OK", confidence=confidence, timestamp=time.time(),
-            ))
+            self.results.append(
+                StepResult(
+                    step_index=self.current_step_index,
+                    step_name=current_step.name,
+                    result="OK",
+                    confidence=confidence,
+                    timestamp=time.time(),
+                )
+            )
             self.current_step_index += 1
             self._step_start_time = time.time()
+            self._timeout_warned_index = None
             if self.current_step_index >= len(self.steps):
                 self.status = SOPStatus.COMPLETE
                 logger.info("工单完成: SN={}", self.work_order_sn)
                 return {"event": "complete", "message": "所有步骤已完成"}
             self.status = SOPStatus.STEP_OK
-            return {"event": "step_ok", "message": f"步骤 {current_step.name} 完成", "next_step": self.steps[self.current_step_index].name}
-        else:
-            if self._consecutive_ok > 0:
-                logger.info("匹配中断 (连续OK {} → 0)，重新计数", self._consecutive_ok)
-            self._consecutive_ok = 0
-            self._consecutive_ng += 1
-            if self._consecutive_ng < self.ng_tolerance:
-                logger.info("动作不匹配 ({}/{}): 期望 [{}]，继续观察",
-                            self._consecutive_ng, self.ng_tolerance, current_step.name)
-                return {"event": "ng_pending", "message": f"动作不匹配 ({self._consecutive_ng}/{self.ng_tolerance})", "confidence": confidence}
-            self.status = SOPStatus.STEP_NG
+            return {
+                "event": "step_ok",
+                "message": f"步骤 {current_step.name} 完成",
+                "next_step": self.steps[self.current_step_index].name,
+            }
+
+        if self._consecutive_ok > 0:
+            logger.info("匹配中断 (连续OK {} → 0)，重新计数", self._consecutive_ok)
+        self._consecutive_ok = 0
+        # 只有明确报出缺陷才算做错。idle=false 但没有 ng_violation，仍是「还没做」
+        if not ng_violation:
+            if self._consecutive_ng:
+                logger.info("未检出缺陷，清空连续 NG 计数（步骤 [{}]）", current_step.name)
             self._consecutive_ng = 0
-            return {"event": "step_ng", "message": f"动作不匹配: 期望 [{current_step.name}]", "confidence": confidence}
+            return {
+                "event": "observing",
+                "message": f"等待中，尚未执行 [{current_step.name}]",
+                "confidence": confidence,
+            }
+
+        self._consecutive_ng += 1
+        if self._consecutive_ng < self.ng_tolerance:
+            logger.info(
+                "动作不匹配 ({}/{}): 期望 [{}]，继续观察", self._consecutive_ng, self.ng_tolerance, current_step.name
+            )
+            return {
+                "event": "ng_pending",
+                "message": f"动作不匹配 ({self._consecutive_ng}/{self.ng_tolerance})",
+                "confidence": confidence,
+            }
+        self.status = SOPStatus.STEP_NG
+        self._consecutive_ng = 0
+        return {"event": "step_ng", "message": f"动作不匹配: 期望 [{current_step.name}]", "confidence": confidence}
 
     def process_global_action(self, action_result: dict) -> dict:
         """全局检测模式：操作员可以以任意顺序完成步骤。"""
@@ -186,12 +239,18 @@ class SOPStateMachine:
 
         step = self.steps[matched_step]
         self.completed_indices.add(matched_step)
-        self.results.append(StepResult(
-            step_index=matched_step, step_name=step.name,
-            result="OK", confidence=confidence, timestamp=time.time(),
-        ))
-        logger.info("全局检测: 步骤 {} [{}] 完成 ({}/{})",
-                     matched_step, step.name, len(self.completed_indices), len(self.steps))
+        self.results.append(
+            StepResult(
+                step_index=matched_step,
+                step_name=step.name,
+                result="OK",
+                confidence=confidence,
+                timestamp=time.time(),
+            )
+        )
+        logger.info(
+            "全局检测: 步骤 {} [{}] 完成 ({}/{})", matched_step, step.name, len(self.completed_indices), len(self.steps)
+        )
 
         if len(self.completed_indices) >= len(self.steps):
             self.status = SOPStatus.COMPLETE
@@ -209,6 +268,7 @@ class SOPStateMachine:
         }
 
     def check_timeout(self) -> dict | None:
+        """节拍超时。默认只预警不停线；timeout_seconds<=0 时关闭。"""
         if self.global_detect:
             return None
         if self.status not in (SOPStatus.RUNNING, SOPStatus.STEP_OK):
@@ -216,22 +276,47 @@ class SOPStateMachine:
         current_step = self.get_current_step()
         if not current_step or self._step_start_time is None:
             return None
+        if current_step.timeout_seconds <= 0:
+            return None
         elapsed = time.time() - self._step_start_time
-        if elapsed > current_step.timeout_seconds:
+        if elapsed <= current_step.timeout_seconds:
+            return None
+        if self._timeout_warned_index == self.current_step_index:
+            return None
+        self._timeout_warned_index = self.current_step_index
+        message = f"步骤 {current_step.name} 超过建议时长 ({elapsed:.0f}s)"
+        if self.timeout_stops_line:
             self.status = SOPStatus.TIMEOUT
-            return {"event": "timeout", "message": f"步骤 {current_step.name} 超时 ({elapsed:.0f}s)", "step_index": self.current_step_index}
-        return None
+            return {
+                "event": "timeout",
+                "stop": True,
+                "message": message,
+                "step_index": self.current_step_index,
+            }
+        logger.info("步骤节拍超时（不停线）: {}", message)
+        return {
+            "event": "timeout_warn",
+            "stop": False,
+            "message": message,
+            "step_index": self.current_step_index,
+        }
 
     def override(self, operator_badge: str, reason: str) -> dict:
         current_step = self.get_current_step()
         if not current_step:
             return {"event": "error", "message": "无法放行：无当前步骤"}
-        self.results.append(StepResult(
-            step_index=self.current_step_index, step_name=current_step.name,
-            result="OVERRIDE", confidence=0.0, timestamp=time.time(),
-        ))
+        self.results.append(
+            StepResult(
+                step_index=self.current_step_index,
+                step_name=current_step.name,
+                result="OVERRIDE",
+                confidence=0.0,
+                timestamp=time.time(),
+            )
+        )
         self.current_step_index += 1
         self._step_start_time = time.time()
+        self._timeout_warned_index = None
         self.status = SOPStatus.RUNNING
         logger.warning("强制放行: step={}, badge={}, reason={}", current_step.name, operator_badge, reason)
         if self.current_step_index >= len(self.steps):
@@ -251,3 +336,4 @@ class SOPStateMachine:
         self._pending_since = 0.0
         self._consecutive_ng = 0
         self._consecutive_ok = 0
+        self._timeout_warned_index = None

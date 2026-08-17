@@ -25,10 +25,12 @@ from loguru import logger
 from src.capture.motion_detect import KeyframeExtractor
 from src.capture.recorder import VideoRecorder
 from src.capture.rtsp_client import RTSPStream
+from src.capture.temporal_sampler import TemporalFrameSampler
 from src.comm.data_sync import OfflineDataSync, Priority
 from src.comm.mqtt_client import MQTTClient
 from src.engine.state_machine import SOPStateMachine, SOPStatus
 from src.engine.vlm_gate import VLMTriggerGate
+from src.inference.frame_policy import select_frames_for_step
 from src.inference.yolo_detector import ObjectTracker, YOLODetector
 from src.storage.sqlite_store import SQLiteStore
 
@@ -88,16 +90,29 @@ def _load_sop_template(template_id: int | str | None = None) -> dict:
 
 def _try_init_modbus():
     """尝试初始化 Modbus 控制器，失败则返回空操作替身。"""
+
     class _NoopAlerter:
-        def connect(self): logger.info("Modbus 跳过（无硬件）")
-        def disconnect(self): pass
-        def alert_ok(self): logger.debug("灯: 绿")
-        def alert_warning(self): logger.debug("灯: 黄 + 蜂鸣")
-        def alert_error(self): logger.debug("灯: 红闪 + 蜂鸣")
-        def alert_idle(self): logger.debug("灯: 关")
+        def connect(self):
+            logger.info("Modbus 跳过（无硬件）")
+
+        def disconnect(self):
+            pass
+
+        def alert_ok(self):
+            logger.debug("灯: 绿")
+
+        def alert_warning(self):
+            logger.debug("灯: 黄 + 蜂鸣")
+
+        def alert_error(self):
+            logger.debug("灯: 红闪 + 蜂鸣")
+
+        def alert_idle(self):
+            logger.debug("灯: 关")
 
     try:
         from src.hardware.alarm import ModbusAlertController
+
         host = os.environ.get("SOP_MODBUS_HOST", "192.168.1.100")
         alerter = ModbusAlertController(host=host)
         alerter.connect()
@@ -111,6 +126,7 @@ def _try_init_minio():
     """尝试初始化 MinIO 上传器，未配置凭证或连接失败时返回 None（降级为本地保存）。"""
     try:
         from src.comm.data_sync import MinIOUploader
+
         uploader = MinIOUploader(
             endpoint=os.environ.get("SOP_MINIO_ENDPOINT", "localhost:9000"),
             bucket=os.environ.get("SOP_MINIO_BUCKET", "sop-videos"),
@@ -145,10 +161,12 @@ def _try_init_vlm():
     """尝试初始化 VLM 客户端，失败则返回 None。"""
     try:
         from src.inference.vlm_recognizer import VLMClient
+
         vlm = VLMClient(
             base_url=os.environ.get("SOP_OLLAMA_URL", "http://localhost:11434"),
             model=os.environ.get("SOP_VLM_MODEL", "qwen3-vl:8b-instruct"),
             num_ctx=int(os.environ.get("SOP_VLM_NUM_CTX", "2048")),
+            use_reference_frame=os.environ.get("SOP_VLM_USE_REFERENCE", "1") == "1",
         )
         warmup_frame = np.zeros((100, 100, 3), dtype=np.uint8)
         result = vlm.classify_action([warmup_frame], {"steps": [{"name": "warmup"}], "current_step_index": 0})
@@ -211,7 +229,7 @@ class _VLMWorker:
         return self._total_infer_ms / max(self._infer_count, 1)
 
     def submit(self, frames, context):
-        """提交推理请求（丢弃旧请求，只保留最新一帧）。"""
+        """提交推理请求（丢弃排队中的旧请求，只保留最新一批帧）。"""
         while not self._request_q.empty():
             try:
                 self._request_q.get_nowait()
@@ -280,12 +298,14 @@ def main() -> None:
     alerter = _try_init_modbus()
 
     from src.comm.mjpeg_server import MJPEGServer
+
     mjpeg_port = int(os.environ.get("SOP_MJPEG_PORT", "8766"))
     mjpeg_fps = int(os.environ.get("SOP_MJPEG_FPS", "30"))
     mjpeg = MJPEGServer(port=mjpeg_port, max_fps=mjpeg_fps, jpeg_quality=85, max_dim=1280)
     mjpeg.start()
 
     import uuid
+
     mqtt_uid = uuid.uuid4().hex[:8]
     mqtt_client = MQTTClient(broker=mqtt_broker, port=mqtt_port, client_id=f"edge-{station_id}-{mqtt_uid}")
     try:
@@ -408,12 +428,14 @@ def main() -> None:
     )
 
     global_detect = os.environ.get("SOP_GLOBAL_DETECT", "0") == "1"
+    timeout_stops_line = os.environ.get("SOP_TIMEOUT_STOPS_LINE", "0") == "1"
     fsm = SOPStateMachine(
         _load_sop_template(),
         debounce_seconds=float(os.environ.get("SOP_DEBOUNCE_SEC", "1.0")),
         ng_tolerance=int(os.environ.get("SOP_NG_TOLERANCE", "5")),
         global_detect=global_detect,
         min_consecutive_pass=int(os.environ.get("SOP_MIN_PASS", "3")),
+        timeout_stops_line=timeout_stops_line,
     )
     vlm_gate = VLMTriggerGate.from_env()
     logger.info(
@@ -426,12 +448,31 @@ def main() -> None:
         sorted(vlm_gate.config.target_objects) or "任意",
     )
 
+    vlm_sampler = TemporalFrameSampler(
+        window=int(os.environ.get("SOP_VLM_FRAME_WINDOW", "4")),
+        interval_seconds=float(os.environ.get("SOP_VLM_FRAME_INTERVAL", "0.4")),
+    )
+    logger.info(
+        "VLM 时序采样: {} 帧 × {}s 间隔（覆盖约 {:.1f}s），自适应分流={}",
+        vlm_sampler.window,
+        vlm_sampler.interval_seconds,
+        (vlm_sampler.window - 1) * vlm_sampler.interval_seconds,
+        os.environ.get("SOP_VLM_ADAPTIVE_WINDOW", "1"),
+    )
+    logger.info("节拍超时停线: {}", "开" if timeout_stops_line else "关（只预警）")
+
+    def _reset_perception() -> None:
+        """清空门控与时序窗口，避免上一步骤的画面影响下一步骤判定。"""
+        vlm_gate.reset()
+        vlm_sampler.reset()
+
     # 后台轮询：IDLE 时每 5 秒查询服务端是否有待处理工单
     _workorder_queue: Queue = Queue(maxsize=1)
     _last_polled_sn: list[str] = [""]  # 用列表包装以便闭包内修改
 
     def _poll_workorder_worker() -> None:
         import requests as _req
+
         api_base = os.environ.get("SOP_API_BASE", "http://localhost:8000")
         edge_secret = os.environ.get("SOP_EDGE_SECRET", "sop-edge-internal-secret")
         headers = {"X-Edge-Secret": edge_secret}
@@ -441,8 +482,13 @@ def main() -> None:
             if fsm.status != SOPStatus.IDLE:
                 continue
             try:
-                resp = _req.get(url, params={"station_id": station_id}, headers=headers, timeout=3,
-                                proxies={"http": None, "https": None})
+                resp = _req.get(
+                    url,
+                    params={"station_id": station_id},
+                    headers=headers,
+                    timeout=3,
+                    proxies={"http": None, "https": None},
+                )
                 if resp.status_code == 200:
                     wo = resp.json().get("workorder")
                     if wo and wo.get("sn") and wo["sn"] != _last_polled_sn[0]:
@@ -479,19 +525,19 @@ def main() -> None:
                 fsm.load_template(tpl)
                 logger.info("工单指定模板 ID={}，已重载: {}", tpl_id, tpl.get("name"))
             fsm.start(sn)
-            vlm_gate.reset()
+            _reset_perception()
             logger.info("工单已启动: {}", sn)
             alerter.alert_warning()
         elif cmd == "override":
             reason = payload.get("reason", "MQTT 远程放行")
             operator = payload.get("operator_id", "remote")
             result = fsm.override(operator_badge=operator, reason=reason)
-            vlm_gate.reset()
+            _reset_perception()
             logger.info("MQTT override: {}", result)
             alerter.alert_warning()
         elif cmd == "reset":
             fsm.reset()
-            vlm_gate.reset()
+            _reset_perception()
             logger.info("MQTT reset: 状态机已重置")
             alerter.alert_idle()
 
@@ -503,13 +549,14 @@ def main() -> None:
     stream.start()
 
     auto_start = os.environ.get("SOP_AUTO_START", "0") == "1"
-    # 防呆语义：生产环境下 STEP_NG / TIMEOUT 必须停线，等待人工 reset / override；
-    # 仅演示/测试模式（SOP_AUTO_START=1 或显式 SOP_AUTO_RECOVER=1）才自动恢复继续检测。
+    # 防呆只停「做错」：STEP_NG 在生产环境必须停线，等待人工 reset / override。
+    # 节拍超时默认不停线（SOP_TIMEOUT_STOPS_LINE=1 才卡节拍）。
+    # 仅演示/测试模式（SOP_AUTO_START=1 或显式 SOP_AUTO_RECOVER=1）才对 NG 自动恢复。
     auto_recover = auto_start or os.environ.get("SOP_AUTO_RECOVER", "0") == "1"
     if auto_start:
         auto_sn = os.environ.get("SOP_AUTO_START_SN", f"AUTO-{time.strftime('%Y%m%d-%H%M%S')}")
         fsm.start(auto_sn)
-        vlm_gate.reset()
+        _reset_perception()
         logger.info("自动启动工单: {} (SOP_AUTO_START=1)", auto_sn)
     else:
         logger.info("边缘端就绪，等待工单启动指令（MQTT command: start_workorder）")
@@ -527,39 +574,54 @@ def main() -> None:
         while True:
             timeout_evt = fsm.check_timeout()
             if timeout_evt:
-                logger.warning("SOP 步骤超时: {}", timeout_evt)
                 tidx = int(timeout_evt.get("step_index", fsm.current_step_index))
                 tstep = fsm.steps[tidx] if tidx < len(fsm.steps) else None
-                local_db.save_step_record(
-                    fsm.work_order_sn or "",
-                    tidx,
-                    tstep.name if tstep else "",
-                    "TIMEOUT",
-                    0.0,
-                    "",
-                    "",
-                )
-                send_step_event({
-                    "work_order_sn": fsm.work_order_sn or "",
-                    "step_index": tidx,
-                    "step_name": tstep.name if tstep else "",
-                    "result": "TIMEOUT",
-                    "confidence": 0.0,
-                    "event": "timeout",
-                })
-                alerter.alert_error()
-                send_alert({
-                    "alert_code": "STEP_TIMEOUT",
-                    "severity": "WARN",
-                    "message": f"步骤超时: {timeout_evt}",
-                    "step_index": fsm.current_step_index,
-                })
-                if auto_recover:
-                    fsm.status = SOPStatus.RUNNING
-                    fsm._step_start_time = time.time()
-                    logger.info("自动恢复: TIMEOUT → RUNNING（演示/测试模式）")
+                if timeout_evt.get("stop"):
+                    logger.warning("SOP 步骤超时停线: {}", timeout_evt)
+                    local_db.save_step_record(
+                        fsm.work_order_sn or "",
+                        tidx,
+                        tstep.name if tstep else "",
+                        "TIMEOUT",
+                        0.0,
+                        "",
+                        "",
+                    )
+                    send_step_event(
+                        {
+                            "work_order_sn": fsm.work_order_sn or "",
+                            "step_index": tidx,
+                            "step_name": tstep.name if tstep else "",
+                            "result": "TIMEOUT",
+                            "confidence": 0.0,
+                            "event": "timeout",
+                        }
+                    )
+                    alerter.alert_error()
+                    send_alert(
+                        {
+                            "alert_code": "STEP_TIMEOUT",
+                            "severity": "ERROR",
+                            "message": f"步骤超时: {timeout_evt}",
+                            "step_index": fsm.current_step_index,
+                        }
+                    )
+                    if auto_recover:
+                        fsm.status = SOPStatus.RUNNING
+                        fsm._step_start_time = time.time()
+                        logger.info("自动恢复: TIMEOUT → RUNNING（演示/测试模式）")
+                    else:
+                        logger.warning("步骤超时已停线，等待人工 reset / override（SOP_TIMEOUT_STOPS_LINE=1）")
                 else:
-                    logger.warning("步骤超时已停线，等待人工 reset / override（防呆模式）")
+                    logger.info("步骤节拍超过建议时长（不停线）: {}", timeout_evt.get("message"))
+                    send_alert(
+                        {
+                            "alert_code": "STEP_CYCLE_WARN",
+                            "severity": "INFO",
+                            "message": str(timeout_evt.get("message", "")),
+                            "step_index": tidx,
+                        }
+                    )
 
             item = stream.get_frame()
             if item is None:
@@ -569,6 +631,7 @@ def main() -> None:
             frame, ts = item
             _last_dets: list = []
             result = {}
+            vlm_sampler.offer(frame, ts)
 
             if fsm.status == SOPStatus.IDLE:
                 mjpeg.update_frame(frame)
@@ -576,7 +639,7 @@ def main() -> None:
                     polled_sn = _workorder_queue.get_nowait()
                     logger.info("轮询启动工单: {}", polled_sn)
                     fsm.start(polled_sn)
-                    vlm_gate.reset()
+                    _reset_perception()
                     alerter.alert_warning()
                 except Empty:
                     pass
@@ -629,9 +692,13 @@ def main() -> None:
                     vlm_action_text = action.get("action", "")
                     vlm_confidence = float(action.get("confidence", 0))
                     vlm_matches = bool(action.get("matches_expected", False))
-                    logger.info("VLM 动作识别: {} (conf={:.2f}, {}ms, avg {}ms)",
-                                vlm_action_text, vlm_confidence, infer_ms,
-                                round(vlm_worker.avg_infer_ms))
+                    logger.info(
+                        "VLM 动作识别: {} (conf={:.2f}, {}ms, avg {}ms)",
+                        vlm_action_text,
+                        vlm_confidence,
+                        infer_ms,
+                        round(vlm_worker.avg_infer_ms),
+                    )
                     if fsm.global_detect:
                         result = fsm.process_global_action(action)
                     else:
@@ -639,22 +706,24 @@ def main() -> None:
 
                     cur_step = fsm.get_current_step()
                     snapshot_b64 = _encode_snapshot(frame)
-                    send_detection({
-                        "station_id": station_id,
-                        "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
-                        "detect_count": detect_count,
-                        "detections": _last_dets,
-                        "yolo_objects": [],
-                        "vlm_action": vlm_action_text,
-                        "vlm_confidence": vlm_confidence,
-                        "vlm_matches": vlm_matches,
-                        "snapshot": snapshot_b64,
-                        "sop_status": fsm.status.value if hasattr(fsm.status, "value") else str(fsm.status),
-                        "sop_step_index": fsm.current_step_index,
-                        "sop_step_name": cur_step.name if cur_step else "",
-                        "sop_total_steps": len(fsm.steps),
-                        "event": result.get("event", ""),
-                    })
+                    send_detection(
+                        {
+                            "station_id": station_id,
+                            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+                            "detect_count": detect_count,
+                            "detections": _last_dets,
+                            "yolo_objects": [],
+                            "vlm_action": vlm_action_text,
+                            "vlm_confidence": vlm_confidence,
+                            "vlm_matches": vlm_matches,
+                            "snapshot": snapshot_b64,
+                            "sop_status": fsm.status.value if hasattr(fsm.status, "value") else str(fsm.status),
+                            "sop_step_index": fsm.current_step_index,
+                            "sop_step_name": cur_step.name if cur_step else "",
+                            "sop_total_steps": len(fsm.steps),
+                            "event": result.get("event", ""),
+                        }
+                    )
                     last_mqtt_send_time = time.monotonic()
 
             def _try_submit_vlm(f, dets):
@@ -674,16 +743,19 @@ def main() -> None:
                     return
                 sop_ctx = {
                     "steps": [
-                        {"name": s.name, "description": s.description,
-                         "required_objects": s.required_objects,
-                         "action_type": s.action_type,
-                         "timeout_seconds": s.timeout_seconds,
-                         "is_optional": s.is_optional,
-                         "ok_criteria": s.ok_criteria,
-                         "ng_criteria": s.ng_criteria,
-                         "reference_frame_url": s.reference_frame_url,
-                         "reference_frame_b64": s.reference_frame_b64,
-                         "reference_frame_timestamp": s.reference_frame_timestamp}
+                        {
+                            "name": s.name,
+                            "description": s.description,
+                            "required_objects": s.required_objects,
+                            "action_type": s.action_type,
+                            "timeout_seconds": s.timeout_seconds,
+                            "is_optional": s.is_optional,
+                            "ok_criteria": s.ok_criteria,
+                            "ng_criteria": s.ng_criteria,
+                            "reference_frame_url": s.reference_frame_url,
+                            "reference_frame_b64": s.reference_frame_b64,
+                            "reference_frame_timestamp": s.reference_frame_timestamp,
+                        }
                         for s in fsm.steps
                     ],
                     "current_step_index": fsm.current_step_index,
@@ -695,7 +767,22 @@ def main() -> None:
                     "reason": decision.reason,
                     "matched_objects": decision.matched_objects,
                 }
-                vlm_worker.submit([f], sop_ctx)
+                # place 类只看当前帧，避免把持握中的位移误读成「已放下」
+                cur = fsm.get_current_step()
+                action_type = cur.action_type if cur and not fsm.global_detect else ""
+                sequence = select_frames_for_step(
+                    action_type,
+                    vlm_sampler.snapshot(),
+                    f,
+                )
+                vlm_worker.submit(sequence, sop_ctx)
+                logger.debug(
+                    "VLM 提交 {} 帧（步骤类型={}），跨度 {:.1f}s，门控={}",
+                    len(sequence),
+                    action_type or "未标注",
+                    vlm_sampler.span_seconds(),
+                    decision.reason,
+                )
                 last_vlm_submit_time = time.monotonic()
 
             if not motion.is_keyframe(frame):
@@ -712,9 +799,7 @@ def main() -> None:
 
             det_dicts = [dataclasses.asdict(d) for d in dets] if isinstance(dets, list) else []
             mjpeg.update_frame(_draw_detections(frame, det_dicts))
-            det_classes = [
-                d.get("class_name", d.get("label", "")) for d in det_dicts
-            ] if det_dicts else []
+            det_classes = [d.get("class_name", d.get("label", "")) for d in det_dicts] if det_dicts else []
 
             _try_submit_vlm(frame, dets)
 
@@ -722,15 +807,17 @@ def main() -> None:
             now_mqtt = time.monotonic()
             if now_mqtt - last_mqtt_send_time >= mqtt_min_interval:
                 snapshot_b64 = _encode_snapshot(frame)
-                send_detection({
-                    "station_id": station_id,
-                    "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
-                    "detect_count": detect_count,
-                    "detections": det_dicts,
-                    "object_count": len(det_dicts),
-                    "unique_classes": list(set(det_classes)),
-                    "snapshot": snapshot_b64,
-                })
+                send_detection(
+                    {
+                        "station_id": station_id,
+                        "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+                        "detect_count": detect_count,
+                        "detections": det_dicts,
+                        "object_count": len(det_dicts),
+                        "unique_classes": list(set(det_classes)),
+                        "snapshot": snapshot_b64,
+                    }
+                )
                 cur_step = fsm.get_current_step()
                 status_msg = {
                     "type": "sop_status",
@@ -780,22 +867,26 @@ def main() -> None:
                     "",
                     "",
                 )
-                send_step_event({
-                    "work_order_sn": fsm.work_order_sn or "",
-                    "step_index": fsm.current_step_index,
-                    "step_name": cur.name if cur else "",
-                    "result": "NG",
-                    "confidence": ng_conf,
-                    "event": "step_ng",
-                })
+                send_step_event(
+                    {
+                        "work_order_sn": fsm.work_order_sn or "",
+                        "step_index": fsm.current_step_index,
+                        "step_name": cur.name if cur else "",
+                        "result": "NG",
+                        "confidence": ng_conf,
+                        "event": "step_ng",
+                    }
+                )
                 alerter.alert_error()
                 recorder.trigger_save("STEP_NG", fsm.work_order_sn or "", fsm.current_step_index)
-                send_alert({
-                    "alert_code": "STEP_NG",
-                    "severity": "ERROR",
-                    "message": f"步骤 NG: {result}",
-                    "step_index": fsm.current_step_index,
-                })
+                send_alert(
+                    {
+                        "alert_code": "STEP_NG",
+                        "severity": "ERROR",
+                        "message": f"步骤 NG: {result}",
+                        "step_index": fsm.current_step_index,
+                    }
+                )
             elif result.get("event") == "step_ok":
                 if fsm.results:
                     sr = fsm.results[-1]
@@ -808,14 +899,17 @@ def main() -> None:
                         "",
                         "",
                     )
-                    send_step_event({
-                        "work_order_sn": fsm.work_order_sn or "",
-                        "step_index": sr.step_index,
-                        "step_name": sr.step_name,
-                        "result": sr.result,
-                        "confidence": sr.confidence,
-                        "event": "step_ok",
-                    })
+                    send_step_event(
+                        {
+                            "work_order_sn": fsm.work_order_sn or "",
+                            "step_index": sr.step_index,
+                            "step_name": sr.step_name,
+                            "result": sr.result,
+                            "confidence": sr.confidence,
+                            "event": "step_ok",
+                        }
+                    )
+                _reset_perception()
                 alerter.alert_ok()
             elif result.get("event") == "override_ok":
                 if fsm.results:
@@ -829,14 +923,16 @@ def main() -> None:
                         "",
                         "",
                     )
-                    send_step_event({
-                        "work_order_sn": fsm.work_order_sn or "",
-                        "step_index": sr.step_index,
-                        "step_name": sr.step_name,
-                        "result": sr.result,
-                        "confidence": sr.confidence,
-                        "event": "override_ok",
-                    })
+                    send_step_event(
+                        {
+                            "work_order_sn": fsm.work_order_sn or "",
+                            "step_index": sr.step_index,
+                            "step_name": sr.step_name,
+                            "result": sr.result,
+                            "confidence": sr.confidence,
+                            "event": "override_ok",
+                        }
+                    )
             elif result.get("event") == "complete":
                 if fsm.results:
                     sr = fsm.results[-1]
@@ -849,22 +945,24 @@ def main() -> None:
                         "",
                         "",
                     )
-                    send_step_event({
-                        "work_order_sn": fsm.work_order_sn or "",
-                        "step_index": sr.step_index,
-                        "step_name": sr.step_name,
-                        "result": sr.result,
-                        "confidence": sr.confidence,
-                        "event": "complete",
-                    })
+                    send_step_event(
+                        {
+                            "work_order_sn": fsm.work_order_sn or "",
+                            "step_index": sr.step_index,
+                            "step_name": sr.step_name,
+                            "result": sr.result,
+                            "confidence": sr.confidence,
+                            "event": "complete",
+                        }
+                    )
                 alerter.alert_ok()
                 logger.info("所有 SOP 步骤完成！")
                 fsm.reset()
-                vlm_gate.reset()
+                _reset_perception()
                 if os.environ.get("SOP_AUTO_START") == "1":
                     new_sn = f"AUTO-{time.strftime('%Y%m%d-%H%M%S')}"
                     fsm.start(new_sn)
-                    vlm_gate.reset()
+                    _reset_perception()
                     logger.info("自动开始新工单: {} (SOP_AUTO_START=1)", new_sn)
                 else:
                     logger.info("状态机已重置为 IDLE，等待下一个工单")

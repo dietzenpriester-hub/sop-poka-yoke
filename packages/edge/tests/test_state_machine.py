@@ -29,10 +29,12 @@ def _advance_step_ok(machine: SOPStateMachine) -> None:
 
 
 def _advance_step_ng(machine: SOPStateMachine) -> dict:
-    """连续达到 ng_tolerance 次不匹配后进入 STEP_NG。"""
+    """连续达到 ng_tolerance 次明确错误后进入 STEP_NG。"""
     result = {}
     for _ in range(machine.ng_tolerance):
-        result = machine.process_action({"matches_expected": False, "confidence": 0.3})
+        result = machine.process_action(
+            {"matches_expected": False, "idle": False, "ng_violation": True, "confidence": 0.3}
+        )
     return result
 
 
@@ -62,8 +64,8 @@ def test_override(sop_machine):
     assert sop_machine.current_step_index == 1
 
 
-def test_timeout_detection(sample_sop_template):
-    """超时检测：当前步停留超过 timeout_seconds 后进入 TIMEOUT。"""
+def test_timeout_is_advisory_by_default(sample_sop_template):
+    """超时默认只预警、不停线：做得慢不是 SOP 违规。"""
     template = {
         **sample_sop_template,
         "steps": [
@@ -79,7 +81,31 @@ def test_timeout_detection(sample_sop_template):
         mock_time.time.return_value = t0 + 100.0
         out = machine.check_timeout()
         assert out is not None
+        assert out["event"] == "timeout_warn"
+        assert out["stop"] is False
+        assert machine.status == SOPStatus.RUNNING
+        assert machine.check_timeout() is None
+
+
+def test_timeout_can_stop_line_when_enabled(sample_sop_template):
+    """仅当 timeout_stops_line=True 时，超时才进入 TIMEOUT 停线。"""
+    template = {
+        **sample_sop_template,
+        "steps": [
+            {**sample_sop_template["steps"][0], "timeout_seconds": 10.0},
+            *sample_sop_template["steps"][1:],
+        ],
+    }
+    machine = SOPStateMachine(template, debounce_seconds=0, timeout_stops_line=True)
+    t0 = 1_000_000.0
+    with patch("src.engine.state_machine.time") as mock_time:
+        mock_time.time.return_value = t0
+        machine.start("SN_TIMEOUT")
+        mock_time.time.return_value = t0 + 100.0
+        out = machine.check_timeout()
+        assert out is not None
         assert out["event"] == "timeout"
+        assert out["stop"] is True
         assert machine.status == SOPStatus.TIMEOUT
 
 
@@ -107,7 +133,7 @@ def test_reset_after_timeout(sample_sop_template):
             *sample_sop_template["steps"][1:],
         ],
     }
-    machine = SOPStateMachine(template, debounce_seconds=0)
+    machine = SOPStateMachine(template, debounce_seconds=0, timeout_stops_line=True)
     t0 = 500.0
     with patch("src.engine.state_machine.time") as mock_time:
         mock_time.time.return_value = t0
@@ -142,14 +168,62 @@ def test_consecutive_pass_requires_stable_matches(sample_sop_template):
     r1 = machine.process_action({"matches_expected": True, "confidence": 0.9})
     assert r1["event"] == "matching"
 
-    r2 = machine.process_action({"matches_expected": False, "confidence": 0.3})
-    assert r2["event"] == "ng_pending"
+    r2 = machine.process_action({"matches_expected": False, "idle": False, "confidence": 0.3})
+    assert r2["event"] == "observing"
 
     for _ in range(machine.min_consecutive_pass - 1):
         r = machine.process_action({"matches_expected": True, "confidence": 0.9})
         assert r["event"] == "matching"
     r3 = machine.process_action({"matches_expected": True, "confidence": 0.9})
     assert r3["event"] == "step_ok"
+
+
+def test_idle_does_not_count_as_ng(sop_machine):
+    """等待不是错误：idle 不得累加 NG，也不能把之前的 NG 计数攒成停线。"""
+    for _ in range(sop_machine.ng_tolerance):
+        result = sop_machine.process_action({"matches_expected": False, "idle": True, "confidence": 0.2})
+        assert result["event"] == "observing"
+        assert sop_machine.status == SOPStatus.RUNNING
+
+    sop_machine.process_action({"matches_expected": False, "idle": False, "ng_violation": True, "confidence": 0.2})
+    idle = sop_machine.process_action({"matches_expected": False, "idle": True, "confidence": 0.2})
+    assert idle["event"] == "observing"
+    assert sop_machine.status == SOPStatus.RUNNING
+    assert sop_machine._consecutive_ng == 0
+
+
+def test_idle_false_without_defect_does_not_ng(sop_machine):
+    """模型把「还没做」标成 idle=false 时，没有 ng_violation 仍不得停线。"""
+    for _ in range(sop_machine.ng_tolerance + 2):
+        result = sop_machine.process_action({"matches_expected": False, "idle": False, "confidence": 0.9})
+        assert result["event"] == "observing"
+    assert sop_machine.status == SOPStatus.RUNNING
+
+
+def test_missing_idle_defaults_to_waiting_not_ng(sop_machine):
+    """模型漏写 idle 时，未匹配按等待处理，不能攒成 STEP_NG。"""
+    for _ in range(sop_machine.ng_tolerance + 2):
+        result = sop_machine.process_action({"matches_expected": False, "confidence": 0.2})
+        assert result["event"] == "observing"
+    assert sop_machine.status == SOPStatus.RUNNING
+
+
+def test_zero_timeout_disables_cycle_watch(sample_sop_template):
+    template = {
+        **sample_sop_template,
+        "steps": [
+            {**sample_sop_template["steps"][0], "timeout_seconds": 0},
+            *sample_sop_template["steps"][1:],
+        ],
+    }
+    machine = SOPStateMachine(template, debounce_seconds=0, timeout_stops_line=True)
+    t0 = 10.0
+    with patch("src.engine.state_machine.time") as mock_time:
+        mock_time.time.return_value = t0
+        machine.start("SN_NO_TO")
+        mock_time.time.return_value = t0 + 10_000.0
+        assert machine.check_timeout() is None
+        assert machine.status == SOPStatus.RUNNING
 
 
 def test_idle_status_initial(sample_sop_template):

@@ -7,7 +7,7 @@
 - `packages/edge/` — 边缘计算层（Python）：视频采集 → AI 推理 → SOP 状态机 → 硬件控制
 - `packages/server/` — 服务端（FastAPI）：REST API、数据持久化、MES 集成
 - `packages/web/` — 管理端前端（Vue 3 + Element Plus）：实时监控、SOP 配置、视频回放
-- `packages/shared/` — 共享协议（JSON Schema → 代码生成）：MQTT 主题、事件类型、数据模型
+- `packages/shared/` — 共享协议：MQTT 主题、事件类型、报警码、JSON Schema 定义
 - `models/` — AI 模型文件（不入 Git，通过 registry.yaml 管理版本）
 - `scripts/` — 运维与工具脚本
 - `deploy/` — 部署配置（Prometheus、Mosquitto 等）
@@ -17,10 +17,10 @@
 - **生产环境必须**启用客户端认证（`password_file` / ACL 等）与 **TLS**；部署前请按 `deploy/mosquitto.conf` 内注释示例调整并管理证书与账号。
 
 ## 技术栈
-- **边缘端**：Python 3.12, OpenCV, YOLOv11 (TensorRT), Qwen3-VL (Ollama), Redis, SQLite
-- **服务端**：FastAPI, SQLAlchemy 2.0 (asyncpg), PostgreSQL, MinIO, MQTT (Mosquitto)
-- **前端**：Vue 3, TypeScript, Element Plus, Pinia, ECharts, WebSocket
-- **部署**：Docker Compose, Prometheus + Grafana
+- **边缘端**：Python >=3.11, OpenCV, YOLOv11n (Ultralytics), Qwen3-VL:8B (Ollama), SQLite, MJPEG 流
+- **服务端**：FastAPI 0.115+, SQLAlchemy 2.0 (asyncpg), PostgreSQL 16, Redis 7, MinIO, MQTT (Mosquitto)
+- **前端**：Vue 3, TypeScript, Element Plus, Pinia, ECharts + vue-echarts, WebSocket
+- **部署**：Docker Compose, Prometheus + Grafana, GitHub Actions CI, Playwright E2E
 
 ## 编码规范
 - Python：类型注解必须、loguru 日志、ruff 格式化、pytest 测试
