@@ -1,0 +1,4 @@
+video,start_sec,end_sec,step_index,step_name,note
+BOX-TEST-174456_step0_STEP_NG_20260402_174534.mp4,0.0,2.4,-1,idle,双手在画面外或放低，尚未取机
+BOX-TEST-174456_step0_STEP_NG_20260402_174534.mp4,2.4,3.5,0,从桌面取起手机,左手从桌面拿起手机
+BOX-TEST-174456_step0_STEP_NG_20260402_174534.mp4,3.5,15.0,1,持手机抬起查看,之后一直左手持机看屏幕，放回从未发生

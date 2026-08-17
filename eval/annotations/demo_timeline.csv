@@ -1,0 +1,4 @@
+video,start_sec,end_sec,step_index,step_name,note
+DEMO-SN-001_step0_STEP_NG_20260331_121515.mp4,0.0,4.8,0,双手置于桌面待命,一手撑头/托腮，手机在桌面未被拿起
+DEMO-SN-001_step0_STEP_NG_20260331_121515.mp4,4.8,5.5,1,从桌面取起手机,约 4.8s 双手拿到胸前
+DEMO-SN-001_step0_STEP_NG_20260331_121515.mp4,5.5,14.32,2,持手机抬起查看,之后基本静止持机；13.4s 右手离开仍未放回桌面

@@ -1,0 +1,34 @@
+{
+  "name": "取放手机核心步骤 SOP",
+  "version": "1.0",
+  "note": "用于片段开头已不是待命姿势的录像。步骤2 放回在这些片段中从未发生。",
+  "steps": [
+    {
+      "name": "从桌面取起手机",
+      "description": "操作员伸手握住桌面上的手机并把它抬离桌面",
+      "required_objects": ["cell phone"],
+      "action_type": "pick",
+      "ok_criteria": "手机被手握住并抬离桌面",
+      "ng_criteria": "拿起了错误物件，或取拿过程中把手机摔落",
+      "timeout_seconds": 0
+    },
+    {
+      "name": "持手机抬起查看",
+      "description": "操作员用手握住手机停在身前，高度可在胸前到脸部之间",
+      "required_objects": ["cell phone"],
+      "action_type": "inspect",
+      "ok_criteria": "手机被握在手中并保持抬起状态，未放回桌面",
+      "ng_criteria": "手机脱手掉落，或换成了其他物件",
+      "timeout_seconds": 0
+    },
+    {
+      "name": "将手机放回桌面",
+      "description": "操作员把手机放回桌面并松手离开",
+      "required_objects": ["cell phone"],
+      "action_type": "place",
+      "ok_criteria": "手机已脱手立回或平放在桌面，手已离开",
+      "ng_criteria": "手机掉到桌下、放到键盘上，或摔落",
+      "timeout_seconds": 0
+    }
+  ]
+}
