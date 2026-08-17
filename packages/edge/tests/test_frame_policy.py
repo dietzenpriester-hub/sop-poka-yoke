@@ -3,6 +3,7 @@
 import numpy as np
 
 from src.inference.frame_policy import (
+    is_assembly_step,
     is_release_step,
     is_transition_step,
     select_frames_for_step,
@@ -22,10 +23,17 @@ def test_release_aliases_are_recognized():
 
 
 def test_transition_aliases_are_recognized():
-    for kind in ("pick", "Pickup", "TAKE", "grab", "pick_place"):
+    for kind in ("pick", "Pickup", "TAKE", "grab"):
         assert is_transition_step(kind)
-    for kind in ("place", "inspect", "hold", "standby", "", None):
+    for kind in ("place", "inspect", "hold", "standby", "screw", "pick_place", "", None):
         assert not is_transition_step(kind)
+
+
+def test_assembly_aliases_are_recognized():
+    for kind in ("screw", "Fasten", "ASSEMBLE", "tighten", "install", "insert", "pick_place"):
+        assert is_assembly_step(kind)
+    for kind in ("pick", "place", "inspect", "hold", "standby", "", None):
+        assert not is_assembly_step(kind)
 
 
 def test_place_step_uses_current_frame_not_stale_window():
@@ -33,6 +41,16 @@ def test_place_step_uses_current_frame_not_stale_window():
     current = _frame(99)
 
     selected = select_frames_for_step("place", sequence, current)
+
+    assert len(selected) == 1
+    assert int(selected[0][0, 0, 0]) == 99
+
+
+def test_screw_step_uses_current_frame_not_stale_window():
+    sequence = [_frame(1), _frame(2), _frame(3), _frame(4)]
+    current = _frame(99)
+
+    selected = select_frames_for_step("screw", sequence, current)
 
     assert len(selected) == 1
     assert int(selected[0][0, 0, 0]) == 99
@@ -75,4 +93,6 @@ def test_env_default_is_adaptive(monkeypatch):
 
     assert uses_temporal_window("place") is False
     assert uses_temporal_window("pick") is False
+    assert uses_temporal_window("screw") is False
+    assert uses_temporal_window("assemble") is False
     assert uses_temporal_window("inspect") is True

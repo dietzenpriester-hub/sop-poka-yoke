@@ -1,8 +1,8 @@
 """按步骤类型决定送给 VLM 的帧策略。
 
-评测表明：4 帧网格能提高 inspect 等持续状态的召回率，但 pick / place 这类
-「结果态」步骤会被网格里的旧画面干扰——桌上与手里混在同一格，会把连续通过
-打断（滞后），或把位移读成已经放下（误放行）。这两类只看当前帧。
+评测表明：4 帧网格能提高 inspect 等持续状态的召回率，但结果态步骤会被网格里
+的旧画面干扰——位移会被读成已经放下 / 拧紧 / 装上。取拿、放置、拧紧、组装
+都只看当前帧。inspect / hold / standby 仍走时序窗口。
 
 乱序检测（global_detect）没有「当前步骤」，不适用本分流，仍走完整时序窗口。
 """
@@ -32,6 +32,21 @@ TRANSITION_ACTION_TYPES = frozenset(
         "pick_up",
         "take",
         "grab",
+    }
+)
+
+# 装配结果态：必须看见已拧到位 / 已贴合定位；工具旋转或零件悬停不算完成
+ASSEMBLY_ACTION_TYPES = frozenset(
+    {
+        "screw",
+        "fasten",
+        "tighten",
+        "assemble",
+        "install",
+        "insert",
+        "mount",
+        "fit",
+        "press",
         "pick_place",
     }
 )
@@ -63,13 +78,18 @@ def is_transition_step(action_type: str | None) -> bool:
     return normalize_action_type(action_type) in TRANSITION_ACTION_TYPES
 
 
+def is_assembly_step(action_type: str | None) -> bool:
+    """是否属于「拧紧 / 组装」类步骤。看结果态：已就位才算完成。"""
+    return normalize_action_type(action_type) in ASSEMBLY_ACTION_TYPES
+
+
 def uses_snapshot_frame(action_type: str | None) -> bool:
-    """取拿 / 放置都按当前画面的结果态判定，不看运动轨迹。"""
-    return is_release_step(action_type) or is_transition_step(action_type)
+    """取拿 / 放置 / 拧紧 / 组装都按当前画面的结果态判定，不看运动轨迹。"""
+    return is_release_step(action_type) or is_transition_step(action_type) or is_assembly_step(action_type)
 
 
 def uses_temporal_window(action_type: str | None, *, adaptive: bool | None = None) -> bool:
-    """取拿、放置在自适应开启时只用当前帧；inspect 等持续状态仍走时序窗口。"""
+    """取拿、放置、拧紧、组装在自适应开启时只用当前帧；inspect 等持续状态仍走时序窗口。"""
     enabled = adaptive_window_enabled() if adaptive is None else adaptive
     if not enabled:
         return True
@@ -85,8 +105,8 @@ def select_frames_for_step(
 ) -> list[Any]:
     """选出本次应提交给 VLM 的帧。
 
-    取拿 / 放置必须用当前帧而不是窗口末帧：采样器会丢掉间隔内的帧，
-    窗口末帧可能已过时，不能代表「此刻是否已离开原位 / 已脱手」。
+    取拿 / 放置 / 拧紧 / 组装必须用当前帧而不是窗口末帧：采样器会丢掉间隔内
+    的帧，窗口末帧可能已过时，不能代表「此刻是否已就位」。
     """
     if uses_temporal_window(action_type, adaptive=adaptive):
         return sequence or [current_frame]

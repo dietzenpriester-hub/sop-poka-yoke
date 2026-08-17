@@ -4,7 +4,7 @@
 - 超时 60s 适配 7B 模型本地推理
 - 多帧拼成时序网格图，让模型能判别动作演进而非静态姿势
 - 步骤参考图作为视觉锚点与当前画面对比，减少对文字描述的依赖
-- place / 脱手类步骤只看当前帧，避免把持握位移误读成已放下
+- place / pick / screw / assemble 等结果态步骤只看当前帧，避免把位移误读成已完成
 - keep_alive 保持模型常驻 GPU/内存
 - JPEG 压缩控制 payload
 """
@@ -19,7 +19,7 @@ import httpx
 import numpy as np
 from loguru import logger
 
-from src.inference.frame_policy import is_release_step, is_transition_step
+from src.inference.frame_policy import is_assembly_step, is_release_step, is_transition_step
 
 _MAX_IMAGE_DIM = 480
 # 2×2 网格取 2 倍单帧上限，使每格分辨率与原先单帧持平，
@@ -235,6 +235,11 @@ class VLMClient:
                 "已经握稳但还在当前步骤，仍应 true，不要改成 idle；"
                 "物件仍完全静置原位、尚未被握住，才是 idle\n"
             )
+        elif is_assembly_step(action_type):
+            type_rule = (
+                "- 拧紧/组装类看结果态：当前画面已满足 OK 判定才为 true（如螺丝已拧到位且工具离开，"
+                "或零件已贴合定位）。工具正在对准、零件悬在上方、或仅有旋转靠近，都还是 idle\n"
+            )
         return (
             f"你是SOP动作验证专家。当前期望步骤：{expected}\n"
             f"{step_detail}\n\n"
@@ -294,6 +299,14 @@ class VLMClient:
                 "若已经握在手里并离开原位，即使动作已经停住，也必须判 true——"
                 "这表示取拿已经完成，不要因为握稳就改成 idle。\n"
                 "只有还没握住、物件仍在原位静置时，才判 idle=true。\n"
+            )
+        elif is_assembly_step(action_type):
+            parts.append(
+                "此步骤是「拧紧/组装」结果态判定。必须在当前画面直接看到已经就位："
+                "螺丝拧到位且工具离开孔位，或零件已进入治具并贴合定位边。\n"
+                "不要因为电批在转、手在按、或零件正在靠近，就推断已经完成。"
+                "悬停、对准、旋转中都还不算，应 idle=true。\n"
+                "已经就位后即使动作停住，仍应判 true。\n"
             )
         elif frame_count > 1:
             parts.append(

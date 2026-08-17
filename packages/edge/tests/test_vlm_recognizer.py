@@ -276,6 +276,22 @@ def test_pick_prompt_treats_held_off_origin_as_done(client):
     assert "正在离开原位" not in prompt
 
 
+def test_screw_prompt_requires_seated_result(client):
+    prompt = client._build_prompt(
+        {
+            "current_step_index": 0,
+            "steps": [{"name": "拧紧螺丝", "action_type": "screw"}],
+        },
+        frame_count=1,
+        has_reference=False,
+    )
+
+    assert "拧紧/组装」结果态" in prompt
+    assert "不要因为电批在转" in prompt
+    assert "悬停、对准、旋转中都还不算" in prompt
+    assert "已经就位后即使动作停住，仍应判 true" in prompt
+
+
 def test_validate_match_clears_idle():
     result = VLMClient._validate_action_result(
         {"action": "正在拧螺丝", "matches_expected": True, "idle": True, "confidence": 0.9}
